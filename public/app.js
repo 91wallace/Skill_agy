@@ -381,6 +381,10 @@ let xterm = null;
 let fitAddon = null;
 let isPtySessionActive = false;
 let currentInteractiveCmd = 'agy';
+let ptyResizeTimeout = null;
+
+const btnPtyScrollTop = document.getElementById('btn-pty-scroll-top');
+const btnPtyScrollBottom = document.getElementById('btn-pty-scroll-bottom');
 
 function initXterm() {
     if (xterm || typeof Terminal === 'undefined') return;
@@ -389,6 +393,10 @@ function initXterm() {
         cursorBlink: true,
         fontFamily: 'monospace, "Courier New", Courier',
         fontSize: currentFontSize || 13,
+        scrollback: 10000,
+        smoothScrollDuration: 100,
+        macOptionIsMeta: true,
+        allowTransparency: false,
         theme: {
             background: '#000000',
             foreground: '#f3f4f6',
@@ -406,8 +414,45 @@ function initXterm() {
     xterm.open(xtermContainer);
 
     if (fitAddon) {
-        fitAddon.fit();
+        try {
+            fitAddon.fit();
+        } catch (e) {}
     }
+
+    // Suporte a gestos touch (deslizar com o dedo no smartphone para rolar o histórico para cima ou para baixo)
+    let touchStartY = 0;
+    let touchAccumulator = 0;
+    const lineHeightEst = (currentFontSize || 13) * 1.25;
+
+    xtermContainer.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches.length === 1) {
+            touchStartY = e.touches[0].clientY;
+            touchAccumulator = 0;
+        }
+    }, { passive: true });
+
+    xtermContainer.addEventListener('touchmove', (e) => {
+        if (!xterm || !e.touches || e.touches.length !== 1) return;
+        const currentY = e.touches[0].clientY;
+        const deltaY = touchStartY - currentY;
+        touchStartY = currentY;
+        touchAccumulator += deltaY;
+
+        if (Math.abs(touchAccumulator) >= lineHeightEst) {
+            const linesToScroll = Math.trunc(touchAccumulator / lineHeightEst);
+            touchAccumulator -= linesToScroll * lineHeightEst;
+            // delta positivo = dedo subiu = rola terminal para baixo (+lines)
+            // delta negativo = dedo desceu = rola terminal para cima (-lines)
+            xterm.scrollLines(linesToScroll);
+        }
+    }, { passive: true });
+
+    // Suporte a scroll via mouse wheel explícito caso a viewport capture
+    xtermContainer.addEventListener('wheel', (e) => {
+        if (!xterm) return;
+        const lines = e.deltaY > 0 ? 3 : -3;
+        xterm.scrollLines(lines);
+    }, { passive: true });
 
     xterm.onData((data) => {
         if (ws && ws.readyState === WebSocket.OPEN && isPtySessionActive) {
@@ -459,7 +504,6 @@ function openPtyView(commandName) {
     initXterm();
 
     if (xterm && fitAddon) {
-        // Redimensiona o canvas imediatamente e logo após a animação de entrada
         const syncSize = () => {
             try {
                 fitAddon.fit();
@@ -474,9 +518,8 @@ function openPtyView(commandName) {
             } catch (e) {}
         };
 
+        // Redimensiona o container uma vez para casar com a viewport
         syncSize();
-        setTimeout(syncSize, 80);
-        setTimeout(syncSize, 220);
         if (xterm) xterm.focus();
     }
 }
@@ -513,6 +556,24 @@ if (btnPtyCollapse) {
     btnPtyCollapse.addEventListener('click', (e) => {
         e.stopPropagation();
         collapsePtyView();
+    });
+}
+
+if (btnPtyScrollTop) {
+    btnPtyScrollTop.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (xterm) {
+            xterm.scrollToTop();
+        }
+    });
+}
+
+if (btnPtyScrollBottom) {
+    btnPtyScrollBottom.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (xterm) {
+            xterm.scrollToBottom();
+        }
     });
 }
 
@@ -1405,7 +1466,12 @@ shortcutBtns.forEach(btn => {
     btn.addEventListener('click', () => {
         const cmd = btn.getAttribute('data-cmd');
         if (cmd && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ tabId: activeTabId, action: 'command', data: cmd }));
+            const payload = { tabId: activeTabId, action: 'command', data: cmd };
+            if (xterm && xterm.cols && xterm.rows) {
+                payload.cols = xterm.cols;
+                payload.rows = xterm.rows;
+            }
+            ws.send(JSON.stringify(payload));
             setProcessing(true);
         }
     });
@@ -1842,7 +1908,12 @@ function runSnippetCommand(cmd) {
         alert('WebSocket desconectado. Aguarde a conexão com o Termux.');
         return;
     }
-    ws.send(JSON.stringify({ action: 'command', data: cmd }));
+    const payload = { tabId: activeTabId, action: 'command', data: cmd };
+    if (xterm && xterm.cols && xterm.rows) {
+        payload.cols = xterm.cols;
+        payload.rows = xterm.rows;
+    }
+    ws.send(JSON.stringify(payload));
     setProcessing(true);
     closeSnippetsModal();
 }

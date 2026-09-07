@@ -777,16 +777,36 @@ button, input {
 
 #xterm-container {
     background-color: #000000;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
 }
 
 .xterm {
-    padding: 6px;
+    padding: 4px 6px;
     height: 100%;
     width: 100%;
 }
 
 .xterm-viewport {
     background-color: #000000 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+}
+
+/* Scrollbar sutil para o xterm */
+.xterm-viewport::-webkit-scrollbar {
+    width: 6px;
+}
+.xterm-viewport::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.5);
+}
+.xterm-viewport::-webkit-scrollbar-thumb {
+    background: rgba(75, 85, 99, 0.6);
+    border-radius: 4px;
+}
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: rgba(34, 197, 94, 0.6);
 }
 
 .pty-key-btn {
