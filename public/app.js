@@ -48,7 +48,23 @@ function getEnvBadgeInfo(tab) {
     const env = (tab.envType || '').toLowerCase();
     const label = (tab.envLabel || '').toLowerCase();
 
-    if (env === 'distro' || label.includes('ubuntu') || label.includes('debian') || label.includes('arch') || label.includes('proot') || label.includes('alpine') || label.includes('linux')) {
+    // Ícone oficial do Ubuntu (Circle of Friends clássico / Flaticon 81270)
+    if (label.includes('ubuntu') || (env === 'distro' && label.includes('ubuntu'))) {
+        return {
+            type: 'ubuntu',
+            badgeClass: 'tab-env-distro',
+            iconSvg: `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="11" fill="#E95420"/>
+                <circle cx="12" cy="12" r="6.2" stroke="#FFFFFF" stroke-width="1.8" fill="none"/>
+                <circle cx="4.5" cy="12" r="1.8" fill="#FFFFFF"/>
+                <circle cx="15.8" cy="5.5" r="1.8" fill="#FFFFFF"/>
+                <circle cx="15.8" cy="18.5" r="1.8" fill="#FFFFFF"/>
+                <circle cx="12" cy="12" r="3.2" fill="#E95420"/>
+            </svg>`
+        };
+    }
+
+    if (env === 'distro' || label.includes('debian') || label.includes('arch') || label.includes('proot') || label.includes('alpine') || label.includes('linux')) {
         return {
             type: 'distro',
             badgeClass: 'tab-env-distro',
