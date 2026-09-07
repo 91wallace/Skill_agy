@@ -658,6 +658,15 @@ function connect() {
             return;
         }
 
+        // Atualização dinâmica de ambiente (ex: entrou no PRoot/Ubuntu ou voltou ao Termux)
+        if (parsed.type === 'env_updated') {
+            targetTab.envType = parsed.envType || targetTab.envType;
+            targetTab.envLabel = parsed.envLabel || targetTab.envLabel;
+            targetTab.title = parsed.title || targetTab.title;
+            renderTabsBar();
+            return;
+        }
+
         // Eventos do terminal interativo PTY
         if (parsed.type === 'pty_opened') {
             targetTab.isRunning = true;

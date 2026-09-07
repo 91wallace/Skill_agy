@@ -558,8 +558,9 @@ wss.on('connection', (ws) => {
                 session.isCurrentProcessPty = false;
                 broadcastTabsList();
 
-                // Injeta suporte para execução limpa de comandos preservando detecção de cwd
-                const wrappedCmd = `${cmd}\n__EXIT_CODE__=$?\necho "__NEW_CWD__=$(pwd)"\nexit $__EXIT_CODE__`;
+                // Injeta suporte para execução limpa de comandos preservando detecção de cwd e de ambiente (Termux vs Distro/PRoot)
+                const envDetectSnippet = `if [ -f /etc/os-release ]; then . /etc/os-release; _DISTRO_NAME="$NAME"; elif [ -n "$PREFIX" ] && echo "$PREFIX" | grep -q com.termux; then _DISTRO_NAME="Termux"; else _DISTRO_NAME="Linux"; fi; echo "__NEW_ENV__=\${_DISTRO_NAME:-Linux}"`;
+                const wrappedCmd = `${cmd}\n__EXIT_CODE__=$?\necho "__NEW_CWD__=$(pwd)"\n${envDetectSnippet}\nexit $__EXIT_CODE__`;
 
                 session.currentProcess = spawn(wrappedCmd, {
                     shell: true,
@@ -579,7 +580,7 @@ wss.on('connection', (ws) => {
                 });
 
                 session.currentProcess.stdout.on('data', (data) => {
-                    const text = data.toString();
+                    let text = data.toString();
                     
                     // Intercepta e atualiza o novo diretório atual
                     if (text.includes('__NEW_CWD__=')) {
@@ -589,11 +590,51 @@ wss.on('connection', (ws) => {
                             broadcastToTab(tabId, { type: 'cwd_updated', cwd: session.cwd });
                             broadcastTabsList();
                         }
-                        const cleanText = text.replace(/__NEW_CWD__=.*?(\r?\n|$)/g, '');
-                        if (cleanText) {
-                            broadcastToTab(tabId, { type: 'output', data: cleanText });
+                        text = text.replace(/__NEW_CWD__=.*?(\r?\n|$)/g, '');
+                    }
+
+                    // Intercepta e atualiza o novo ambiente em tempo real (ex: Termux -> Ubuntu PRoot)
+                    if (text.includes('__NEW_ENV__=')) {
+                        const envMatch = text.match(/__NEW_ENV__=(.*?)(\r?\n|$)/);
+                        if (envMatch && envMatch[1]) {
+                            const rawEnv = envMatch[1].trim();
+                            let detectedType = 'distro';
+                            let detectedLabel = rawEnv;
+
+                            if (/termux/i.test(rawEnv)) {
+                                detectedType = 'termux';
+                                detectedLabel = 'Termux';
+                            } else if (/ubuntu/i.test(rawEnv)) {
+                                detectedLabel = 'Ubuntu';
+                            } else if (/debian/i.test(rawEnv)) {
+                                detectedLabel = 'Debian';
+                            } else if (/arch/i.test(rawEnv)) {
+                                detectedLabel = 'Arch';
+                            } else if (/alpine/i.test(rawEnv)) {
+                                detectedLabel = 'Alpine';
+                            } else if (/fedora/i.test(rawEnv)) {
+                                detectedLabel = 'Fedora';
+                            } else if (/kali/i.test(rawEnv)) {
+                                detectedLabel = 'Kali';
+                            }
+
+                            if (!session.isSsh && (session.envLabel !== detectedLabel || session.envType !== detectedType)) {
+                                session.envType = detectedType;
+                                session.envLabel = detectedLabel;
+                                session.title = detectedLabel;
+                                broadcastToTab(tabId, {
+                                    type: 'env_updated',
+                                    envType: detectedType,
+                                    envLabel: detectedLabel,
+                                    title: detectedLabel
+                                });
+                                broadcastTabsList();
+                            }
                         }
-                    } else {
+                        text = text.replace(/__NEW_ENV__=.*?(\r?\n|$)/g, '');
+                    }
+
+                    if (text) {
                         broadcastToTab(tabId, { type: 'output', data: text });
                     }
                 });
