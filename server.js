@@ -22,19 +22,13 @@ const sessions = new Map(); // tabId -> SessionObject
 
 // Detecção do ambiente de execução do sistema hospedeiro (Termux, Proot, Distro Linux)
 function getHostEnvironmentType() {
-    const isTermux = !!(process.env.TERMUX_VERSION || (process.env.PREFIX && process.env.PREFIX.includes('com.termux')) || fs.existsSync('/data/data/com.termux/files/usr/bin/bash'));
-    
-    // Se estiver em proot ou chroot
-    const isProot = fs.existsSync('/proot') || (process.env.PROOT_TMP_DIR !== undefined) || (process.env.PRUN !== undefined);
-
-    let distroName = 'Linux';
+    let distroName = null;
     try {
         if (fs.existsSync('/etc/os-release')) {
             const osRelease = fs.readFileSync('/etc/os-release', 'utf8');
             const nameMatch = osRelease.match(/^(?:NAME|ID)=(?:")?([^"\n\r]+)(?:")?/m);
             if (nameMatch && nameMatch[1]) {
                 const rawName = nameMatch[1].trim();
-                // Normaliza nomes conhecidos
                 if (/ubuntu/i.test(rawName)) distroName = 'Ubuntu';
                 else if (/debian/i.test(rawName)) distroName = 'Debian';
                 else if (/arch/i.test(rawName)) distroName = 'Arch';
@@ -47,26 +41,33 @@ function getHostEnvironmentType() {
         }
     } catch (e) {}
 
+    // Se encontramos uma distro via /etc/os-release (ex: Ubuntu em PRoot ou Ubuntu Linux nativo)
+    if (distroName && !/termux/i.test(distroName)) {
+        return { type: 'distro', label: distroName };
+    }
+
+    const isTermux = !!(process.env.TERMUX_VERSION || (process.env.PREFIX && process.env.PREFIX.includes('com.termux')) || fs.existsSync('/data/data/com.termux/files/usr/bin/bash'));
+    const isProot = fs.existsSync('/proot') || (process.env.PROOT_TMP_DIR !== undefined) || (process.env.PRUN !== undefined);
+
     if (isTermux && !isProot) {
         return { type: 'termux', label: 'Termux' };
-    } else if (isProot) {
-        return { type: 'distro', label: `${distroName} (PRoot)` };
-    } else {
+    } else if (distroName) {
         return { type: 'distro', label: distroName };
+    } else {
+        return { type: 'distro', label: 'Linux' };
     }
 }
 
-const hostEnv = getHostEnvironmentType();
-
 function createSession(tabId, title = null, initialCwd = null) {
+    const currentEnv = getHostEnvironmentType();
     const defaultCwd = initialCwd || process.env.HOME || process.cwd();
-    const defaultTitle = title || hostEnv.label;
+    const defaultTitle = title || currentEnv.label;
     const session = {
         id: tabId,
         title: defaultTitle,
         cwd: defaultCwd,
-        envType: hostEnv.type, // 'termux' | 'distro' | 'ssh'
-        envLabel: hostEnv.label,
+        envType: currentEnv.type, // 'termux' | 'distro' | 'ssh'
+        envLabel: currentEnv.label,
         currentProcess: null,
         isCurrentProcessPty: false,
         isSsh: false,
@@ -117,12 +118,13 @@ function broadcastToTab(tabId, obj) {
 }
 
 function broadcastTabsList() {
+    const defaultEnv = getHostEnvironmentType();
     const list = Array.from(sessions.values()).map(s => ({
         id: s.id,
         title: s.title,
         cwd: s.cwd,
-        envType: s.isSsh ? 'ssh' : (s.envType || hostEnv.type),
-        envLabel: s.isSsh ? 'SSH' : (s.envLabel || hostEnv.label),
+        envType: s.isSsh ? 'ssh' : (s.envType || defaultEnv.type),
+        envLabel: s.isSsh ? 'SSH' : (s.envLabel || defaultEnv.label),
         isRunning: (s.currentProcess !== null) || (s.isSsh && s.sshClient !== null),
         isPty: s.isCurrentProcessPty || s.isSsh,
         isSsh: !!s.isSsh,
@@ -141,14 +143,16 @@ wss.on('connection', (ws) => {
     // Ao conectar/reconectar, envia lista de abas disponíveis
     broadcastTabsList();
 
+    const defaultEnv = getHostEnvironmentType();
+
     // Envia o estado de todas as abas
     sessions.forEach((session) => {
         ws.send(JSON.stringify({
             type: 'history',
             tabId: session.id,
             title: session.title,
-            envType: session.isSsh ? 'ssh' : (session.envType || hostEnv.type),
-            envLabel: session.isSsh ? 'SSH' : (session.envLabel || hostEnv.label),
+            envType: session.isSsh ? 'ssh' : (session.envType || defaultEnv.type),
+            envLabel: session.isSsh ? 'SSH' : (session.envLabel || defaultEnv.label),
             data: session.logHistory,
             cwd: session.cwd,
             isRunning: (session.currentProcess !== null) || (session.isSsh && session.sshClient !== null),
@@ -173,14 +177,13 @@ wss.on('connection', (ws) => {
         // Ação: Criar nova aba
         if (parsed.action === 'create_tab') {
             const newTabId = parsed.newTabId || ('tab-' + Date.now().toString(36));
-            const tabTitle = parsed.title || hostEnv.label;
             const initialCwd = parsed.cwd || (session ? session.cwd : null);
-            const newSession = createSession(newTabId, tabTitle, initialCwd);
+            const newSession = createSession(newTabId, parsed.title || null, initialCwd);
             broadcastTabsList();
             ws.send(JSON.stringify({
                 type: 'tab_created',
                 tabId: newTabId,
-                title: tabTitle,
+                title: newSession.title,
                 envType: newSession.envType,
                 envLabel: newSession.envLabel,
                 cwd: newSession.cwd,
@@ -236,7 +239,7 @@ wss.on('connection', (ws) => {
 
         // Se a sessão não existir para as demais ações, cria dinamicamente
         if (!session) {
-            session = createSession(tabId, hostEnv.label);
+            session = createSession(tabId);
             broadcastTabsList();
         }
 
