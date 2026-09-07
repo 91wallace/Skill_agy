@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const { Client } = require('ssh2');
 
 const app = express();
 app.use(cors());
@@ -27,6 +28,10 @@ function createSession(tabId, title = 'Terminal 1', initialCwd = null) {
         cwd: defaultCwd,
         currentProcess: null,
         isCurrentProcessPty: false,
+        isSsh: false,
+        sshClient: null,
+        sshStream: null,
+        sshHost: null,
         logHistory: [],
         lastCommand: ''
     };
@@ -75,8 +80,10 @@ function broadcastTabsList() {
         id: s.id,
         title: s.title,
         cwd: s.cwd,
-        isRunning: s.currentProcess !== null,
-        isPty: s.isCurrentProcessPty,
+        isRunning: (s.currentProcess !== null) || (s.isSsh && s.sshClient !== null),
+        isPty: s.isCurrentProcessPty || s.isSsh,
+        isSsh: !!s.isSsh,
+        sshHost: s.sshHost || null,
         lastCommand: s.lastCommand
     }));
     const json = JSON.stringify({ type: 'tabs_list', tabs: list });
@@ -99,8 +106,10 @@ wss.on('connection', (ws) => {
             title: session.title,
             data: session.logHistory,
             cwd: session.cwd,
-            isRunning: session.currentProcess !== null,
-            isPty: session.isCurrentProcessPty
+            isRunning: (session.currentProcess !== null) || (session.isSsh && session.sshClient !== null),
+            isPty: session.isCurrentProcessPty || session.isSsh,
+            isSsh: !!session.isSsh,
+            sshHost: session.sshHost || null
         }));
     });
 
@@ -129,7 +138,8 @@ wss.on('connection', (ws) => {
                 title: tabTitle,
                 cwd: newSession.cwd,
                 isRunning: false,
-                isPty: false
+                isPty: false,
+                isSsh: false
             }));
             return;
         }
@@ -139,7 +149,16 @@ wss.on('connection', (ws) => {
             const targetTabId = parsed.targetTabId || tabId;
             const targetSession = sessions.get(targetTabId);
             if (targetSession) {
-                // Se o processo estiver rodando na aba, encerra-o
+                // Se for sessão SSH ativa, encerra conexão
+                if (targetSession.isSsh && targetSession.sshClient) {
+                    try {
+                        if (targetSession.sshStream) targetSession.sshStream.end();
+                        targetSession.sshClient.end();
+                    } catch (e) {}
+                    targetSession.sshClient = null;
+                    targetSession.sshStream = null;
+                }
+                // Se o processo local estiver rodando na aba, encerra-o
                 if (targetSession.currentProcess) {
                     try {
                         if (targetSession.isCurrentProcessPty && targetSession.currentProcess.stdin && !targetSession.currentProcess.stdin.destroyed) {
@@ -172,6 +191,120 @@ wss.on('connection', (ws) => {
         if (!session) {
             session = createSession(tabId, `Terminal ${sessions.size + 1}`);
             broadcastTabsList();
+        }
+
+        // Ação: Conectar via SSH Nativo
+        if (parsed.action === 'ssh_connect') {
+            const host = parsed.host;
+            const port = parseInt(parsed.port, 10) || 22;
+            const username = parsed.username || 'root';
+            const password = parsed.password;
+            const privateKey = parsed.privateKey;
+            const termCols = parsed.cols || 80;
+            const termRows = parsed.rows || 24;
+
+            if (!host) {
+                ws.send(JSON.stringify({ tabId, type: 'error', data: '\n[Erro SSH: Host ou IP não especificado]\n' }));
+                return;
+            }
+
+            // Encerra processo ou conexão SSH anterior na mesma aba se houver
+            if (session.sshClient) {
+                try {
+                    if (session.sshStream) session.sshStream.end();
+                    session.sshClient.end();
+                } catch (e) {}
+                session.sshClient = null;
+                session.sshStream = null;
+            }
+
+            session.isSsh = true;
+            session.sshHost = `${username}@${host}:${port}`;
+            session.title = `SSH: ${username}@${host}`;
+            session.isCurrentProcessPty = true;
+
+            broadcastToTab(tabId, { type: 'system', data: `\n[Iniciando conexão SSH com ${username}@${host}:${port}...]\n` });
+            broadcastToTab(tabId, { type: 'pty_opened', command: `ssh ${username}@${host}` });
+            broadcastTabsList();
+
+            const conn = new Client();
+            session.sshClient = conn;
+
+            conn.on('ready', () => {
+                broadcastToTab(tabId, { type: 'system', data: `\n[Autenticado com sucesso em ${host}! Abrindo terminal PTY...]\n\r` });
+                conn.shell({ term: 'xterm-256color', cols: termCols, rows: termRows }, (err, stream) => {
+                    if (err) {
+                        broadcastToTab(tabId, { type: 'error', data: `\n[Erro ao criar shell SSH: ${err.message}]\n` });
+                        conn.end();
+                        return;
+                    }
+
+                    session.sshStream = stream;
+
+                    stream.on('data', (data) => {
+                        broadcastToTab(tabId, { type: 'pty_output', data: data.toString('utf-8') });
+                    });
+
+                    stream.stderr.on('data', (data) => {
+                        broadcastToTab(tabId, { type: 'pty_output', data: data.toString('utf-8') });
+                    });
+
+                    stream.on('close', () => {
+                        broadcastToTab(tabId, { type: 'system', data: `\n\r[Sessão SSH encerrada pelo servidor remoto]\n\r` });
+                        broadcastToTab(tabId, { type: 'pty_closed' });
+                        broadcastToTab(tabId, { type: 'status_idle' });
+                        session.isSsh = false;
+                        session.sshStream = null;
+                        session.sshClient = null;
+                        session.isCurrentProcessPty = false;
+                        broadcastTabsList();
+                    });
+                });
+            });
+
+            conn.on('error', (err) => {
+                broadcastToTab(tabId, { type: 'error', data: `\n[Erro de Conexão SSH: ${err.message}]\n` });
+                broadcastToTab(tabId, { type: 'pty_closed' });
+                broadcastToTab(tabId, { type: 'status_idle' });
+                session.isSsh = false;
+                session.sshStream = null;
+                session.sshClient = null;
+                session.isCurrentProcessPty = false;
+                broadcastTabsList();
+            });
+
+            conn.on('end', () => {
+                session.isSsh = false;
+                session.sshStream = null;
+                session.sshClient = null;
+                session.isCurrentProcessPty = false;
+                broadcastTabsList();
+            });
+
+            const sshConfig = {
+                host: host,
+                port: port,
+                username: username,
+                readyTimeout: 20000,
+                keepaliveInterval: 10000
+            };
+
+            if (privateKey && privateKey.trim()) {
+                sshConfig.privateKey = privateKey.trim();
+                if (password) sshConfig.passphrase = password;
+            } else if (password !== undefined) {
+                sshConfig.password = password;
+            }
+
+            try {
+                conn.connect(sshConfig);
+            } catch (err) {
+                broadcastToTab(tabId, { type: 'error', data: `\n[Falha ao inicializar SSH: ${err.message}]\n` });
+                session.isSsh = false;
+                session.sshClient = null;
+                broadcastTabsList();
+            }
+            return;
         }
 
         // Ação de listagem de diretório em árvore (rápida e assíncrona)
@@ -220,12 +353,18 @@ wss.on('connection', (ws) => {
 
         // Ação de redimensionamento do terminal PTY
         if (parsed.action === 'pty_resize') {
-            if (session.currentProcess && session.isCurrentProcessPty && session.currentProcess.stdin && !session.currentProcess.stdin.destroyed) {
+            const cols = parsed.cols || 80;
+            const rows = parsed.rows || 24;
+            if (session.isSsh && session.sshStream) {
+                try {
+                    session.sshStream.setWindow(rows, cols, 0, 0);
+                } catch (e) {}
+            } else if (session.currentProcess && session.isCurrentProcessPty && session.currentProcess.stdin && !session.currentProcess.stdin.destroyed) {
                 try {
                     const resizePayload = JSON.stringify({
                         __ctrl__: 'resize',
-                        cols: parsed.cols || 80,
-                        rows: parsed.rows || 24
+                        cols: cols,
+                        rows: rows
                     }) + '\n';
                     session.currentProcess.stdin.write(resizePayload);
                 } catch (e) {}
@@ -235,6 +374,12 @@ wss.on('connection', (ws) => {
 
         // Ação de cancelamento explícito (Ctrl+C)
         if (parsed.action === 'kill') {
+            if (session.isSsh && session.sshStream) {
+                try {
+                    session.sshStream.write('\x03');
+                } catch (e) {}
+                return;
+            }
             if (session.currentProcess) {
                 try {
                     if (session.isCurrentProcessPty && session.currentProcess.stdin && !session.currentProcess.stdin.destroyed) {
@@ -270,6 +415,12 @@ wss.on('connection', (ws) => {
         // Ação de entrada interativa / tecla / resposta (stdin ou PTY raw input)
         if (parsed.action === 'input' || parsed.action === 'pty_input') {
             const rawData = parsed.data !== undefined ? String(parsed.data) : '';
+            if (session.isSsh && session.sshStream) {
+                try {
+                    session.sshStream.write(rawData);
+                } catch (e) {}
+                return;
+            }
             if (session.currentProcess && session.currentProcess.stdin && !session.currentProcess.stdin.destroyed) {
                 try {
                     if (session.isCurrentProcessPty) {

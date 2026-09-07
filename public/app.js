@@ -8,7 +8,7 @@ const tabsListContainer = document.getElementById('tabs-list');
 const btnAddTab = document.getElementById('btn-add-tab');
 
 let activeTabId = 'tab-1';
-const tabsMap = new Map(); // tabId -> { id, title, cwd, isRunning, isPty, logsHtml: '', pastCommands: [], activeCmd: null, activeProcessCardState: null }
+const tabsMap = new Map(); // tabId -> { id, title, cwd, isRunning, isPty, isSsh, sshHost, logsHtml: '', pastCommands: [], activeCmd: null, activeProcessCardState: null }
 
 function getOrCreateTabData(tabId, title = 'Terminal 1') {
     if (!tabsMap.has(tabId)) {
@@ -18,6 +18,8 @@ function getOrCreateTabData(tabId, title = 'Terminal 1') {
             cwd: '~',
             isRunning: false,
             isPty: false,
+            isSsh: false,
+            sshHost: null,
             outputHtml: '',
             pastCommandsHistory: [],
             activeCommandTracker: null,
@@ -40,7 +42,9 @@ function renderTabsBar() {
         tabEl.className = `tab-item ${isActive ? 'active' : ''}`;
         
         let statusIndicator = '';
-        if (tab.isRunning) {
+        if (tab.isSsh) {
+            statusIndicator = `<span class="tab-running-dot ssh ${tab.isRunning ? 'animate-pulse' : ''}" title="Sessão Remota SSH"></span>`;
+        } else if (tab.isRunning) {
             statusIndicator = `<span class="tab-running-dot ${tab.isPty ? 'pty' : ''}" title="${tab.isPty ? 'Sessão Interativa PTY' : 'Processo em Execução'}"></span>`;
         }
 
@@ -529,6 +533,8 @@ function connect() {
                     existing.cwd = t.cwd || existing.cwd;
                     existing.isRunning = t.isRunning;
                     existing.isPty = t.isPty;
+                    existing.isSsh = !!t.isSsh;
+                    existing.sshHost = t.sshHost || null;
                 });
                 renderTabsBar();
             }
@@ -537,7 +543,8 @@ function connect() {
 
         // Nova aba criada
         if (parsed.type === 'tab_created') {
-            getOrCreateTabData(parsed.tabId, parsed.title);
+            const newTab = getOrCreateTabData(parsed.tabId, parsed.title);
+            newTab.isSsh = !!parsed.isSsh;
             renderTabsBar();
             return;
         }
@@ -560,6 +567,8 @@ function connect() {
         if (parsed.type === 'history') {
             targetTab.isRunning = !!parsed.isRunning;
             targetTab.isPty = !!parsed.isPty;
+            targetTab.isSsh = !!parsed.isSsh;
+            targetTab.sshHost = parsed.sshHost || null;
             if (parsed.cwd) {
                 targetTab.cwd = parsed.cwd;
             }
@@ -1364,6 +1373,314 @@ if (window.visualViewport) {
         scrollToBottom();
     });
 }
+
+// ==========================================
+// GERENCIADOR DE CONEXÕES SSH REMOTAS
+// ==========================================
+const btnSshToggle = document.getElementById('btn-ssh-toggle');
+const sshModal = document.getElementById('ssh-modal');
+const sshBackdrop = document.getElementById('ssh-backdrop');
+const btnCloseSsh = document.getElementById('btn-close-ssh');
+const btnToggleAddSsh = document.getElementById('btn-toggle-add-ssh');
+const sshFormContainer = document.getElementById('ssh-form-container');
+const sshLabelInput = document.getElementById('ssh-label-input');
+const sshHostInput = document.getElementById('ssh-host-input');
+const sshPortInput = document.getElementById('ssh-port-input');
+const sshUserInput = document.getElementById('ssh-user-input');
+const sshPasswordInput = document.getElementById('ssh-password-input');
+const sshKeyInput = document.getElementById('ssh-key-input');
+const sshPassphraseInput = document.getElementById('ssh-passphrase-input');
+const sshAuthPasswordRadio = document.querySelector('input[name="ssh-auth-type"][value="password"]');
+const sshAuthKeyRadio = document.querySelector('input[name="ssh-auth-type"][value="key"]');
+const sshAuthPasswordField = document.getElementById('ssh-auth-password-field');
+const sshAuthKeyField = document.getElementById('ssh-auth-key-field');
+const btnCancelSshForm = document.getElementById('btn-cancel-ssh-form');
+const btnSaveSshProfile = document.getElementById('btn-save-ssh-profile');
+const btnConnectSshDirect = document.getElementById('btn-connect-ssh-direct');
+const sshProfilesList = document.getElementById('ssh-profiles-list');
+
+const SSH_STORAGE_KEY = 'termux_web_ssh_profiles_v1';
+
+const defaultSshProfiles = [
+    {
+        id: 'default-local-proot',
+        label: 'Proot Linux Local (SSH)',
+        host: '127.0.0.1',
+        port: 8022,
+        username: 'root',
+        authType: 'password',
+        password: ''
+    }
+];
+
+function getSshProfiles() {
+    try {
+        const saved = localStorage.getItem(SSH_STORAGE_KEY);
+        return saved ? JSON.parse(saved) : defaultSshProfiles;
+    } catch (e) {
+        return defaultSshProfiles;
+    }
+}
+
+function saveSshProfiles(profiles) {
+    localStorage.setItem(SSH_STORAGE_KEY, JSON.stringify(profiles));
+    renderSshProfiles();
+}
+
+function renderSshProfiles() {
+    if (!sshProfilesList) return;
+    const profiles = getSshProfiles();
+    sshProfilesList.innerHTML = '';
+
+    if (profiles.length === 0) {
+        sshProfilesList.innerHTML = `
+            <div class="text-center py-6 text-gray-500 text-xs">
+                Nenhum host SSH salvo.<br>Clique em <b>Novo Host</b> acima para adicionar.
+            </div>
+        `;
+        return;
+    }
+
+    profiles.forEach((profile) => {
+        const card = document.createElement('div');
+        card.className = 'ssh-profile-card bg-gray-800/60 border border-gray-700/60 hover:border-emerald-500/50 rounded-xl p-3 flex items-center justify-between gap-3 transition-all';
+        
+        const hostInfo = `${profile.username || 'root'}@${profile.host}:${profile.port || 22}`;
+        const labelText = profile.label || profile.host;
+
+        card.innerHTML = `
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                <div class="w-8 h-8 rounded-lg bg-emerald-950/80 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                    </svg>
+                </div>
+                <div class="min-w-0 flex-1">
+                    <div class="text-xs font-bold text-gray-100 truncate">${escapeHtml(labelText)}</div>
+                    <div class="text-[11px] text-emerald-400/90 font-mono truncate">${escapeHtml(hostInfo)}</div>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+                <button type="button" class="btn-ssh-delete text-gray-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-gray-700/60 transition-colors" title="Excluir Perfil">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+                <button type="button" class="btn-ssh-connect bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg active:scale-95 transition-transform flex items-center gap-1 shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    <span>Conectar</span>
+                </button>
+            </div>
+        `;
+
+        // Botão Conectar
+        card.querySelector('.btn-ssh-connect').addEventListener('click', (e) => {
+            e.stopPropagation();
+            connectToSshProfile(profile);
+        });
+
+        // Botão Excluir
+        card.querySelector('.btn-ssh-delete').addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteSshProfile(profile.id);
+        });
+
+        sshProfilesList.appendChild(card);
+    });
+}
+
+function deleteSshProfile(id) {
+    const profiles = getSshProfiles().filter(p => p.id !== id);
+    saveSshProfiles(profiles);
+}
+
+function openSshModal() {
+    renderSshProfiles();
+    if (sshModal) {
+        sshModal.classList.remove('hidden');
+        void sshModal.offsetWidth;
+        sshModal.classList.add('open');
+    }
+    hideSshForm();
+}
+
+function closeSshModal() {
+    if (sshModal) {
+        sshModal.classList.remove('open');
+        setTimeout(() => {
+            sshModal.classList.add('hidden');
+            hideSshForm();
+        }, 250);
+    }
+}
+
+function showSshForm(prefill = null) {
+    if (sshFormContainer) {
+        sshFormContainer.classList.remove('hidden');
+    }
+    if (prefill) {
+        sshLabelInput.value = prefill.label || '';
+        sshHostInput.value = prefill.host || '';
+        sshPortInput.value = prefill.port || 22;
+        sshUserInput.value = prefill.username || 'root';
+        if (prefill.authType === 'key') {
+            if (sshAuthKeyRadio) sshAuthKeyRadio.checked = true;
+            toggleSshAuthField('key');
+            sshKeyInput.value = prefill.privateKey || '';
+            sshPassphraseInput.value = prefill.password || '';
+        } else {
+            if (sshAuthPasswordRadio) sshAuthPasswordRadio.checked = true;
+            toggleSshAuthField('password');
+            sshPasswordInput.value = prefill.password || '';
+        }
+    } else {
+        sshLabelInput.value = '';
+        sshHostInput.value = '';
+        sshPortInput.value = '22';
+        sshUserInput.value = 'root';
+        sshPasswordInput.value = '';
+        sshKeyInput.value = '';
+        sshPassphraseInput.value = '';
+        if (sshAuthPasswordRadio) sshAuthPasswordRadio.checked = true;
+        toggleSshAuthField('password');
+    }
+    if (sshHostInput) sshHostInput.focus();
+}
+
+function hideSshForm() {
+    if (sshFormContainer) {
+        sshFormContainer.classList.add('hidden');
+    }
+}
+
+function toggleSshAuthField(type) {
+    if (type === 'key') {
+        if (sshAuthKeyField) sshAuthKeyField.classList.remove('hidden');
+        if (sshAuthPasswordField) sshAuthPasswordField.classList.add('hidden');
+    } else {
+        if (sshAuthKeyField) sshAuthKeyField.classList.add('hidden');
+        if (sshAuthPasswordField) sshAuthPasswordField.classList.remove('hidden');
+    }
+}
+
+if (sshAuthPasswordRadio) {
+    sshAuthPasswordRadio.addEventListener('change', () => toggleSshAuthField('password'));
+}
+if (sshAuthKeyRadio) {
+    sshAuthKeyRadio.addEventListener('change', () => toggleSshAuthField('key'));
+}
+
+if (btnSshToggle) btnSshToggle.addEventListener('click', openSshModal);
+if (btnCloseSsh) btnCloseSsh.addEventListener('click', closeSshModal);
+if (sshBackdrop) sshBackdrop.addEventListener('click', closeSshModal);
+
+if (btnToggleAddSsh) {
+    btnToggleAddSsh.addEventListener('click', () => {
+        if (sshFormContainer && sshFormContainer.classList.contains('hidden')) {
+            showSshForm();
+        } else {
+            hideSshForm();
+        }
+    });
+}
+
+if (btnCancelSshForm) {
+    btnCancelSshForm.addEventListener('click', hideSshForm);
+}
+
+function collectSshFormData() {
+    const host = sshHostInput.value.trim();
+    const port = parseInt(sshPortInput.value, 10) || 22;
+    const username = sshUserInput.value.trim() || 'root';
+    const label = sshLabelInput.value.trim() || `${username}@${host}`;
+    const authType = (sshAuthKeyRadio && sshAuthKeyRadio.checked) ? 'key' : 'password';
+    const password = authType === 'password' ? sshPasswordInput.value : (sshPassphraseInput.value || undefined);
+    const privateKey = authType === 'key' ? sshKeyInput.value.trim() : undefined;
+
+    if (!host) {
+        alert('Por favor, informe o Host ou IP do servidor SSH.');
+        return null;
+    }
+
+    return {
+        id: 'ssh-' + Date.now().toString(36),
+        label,
+        host,
+        port,
+        username,
+        authType,
+        password,
+        privateKey
+    };
+}
+
+if (btnSaveSshProfile) {
+    btnSaveSshProfile.addEventListener('click', () => {
+        const profile = collectSshFormData();
+        if (!profile) return;
+        const profiles = getSshProfiles();
+        profiles.unshift(profile);
+        saveSshProfiles(profiles);
+        hideSshForm();
+    });
+}
+
+if (btnConnectSshDirect) {
+    btnConnectSshDirect.addEventListener('click', () => {
+        const profile = collectSshFormData();
+        if (!profile) return;
+        connectToSshProfile(profile);
+    });
+}
+
+function connectToSshProfile(profile) {
+    if (!profile || !profile.host) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('WebSocket desconectado. Aguarde a conexão com o servidor local.');
+        return;
+    }
+
+    closeSshModal();
+
+    // Cria uma nova aba especificamente para a sessão SSH
+    const newTabId = 'ssh-tab-' + Date.now().toString(36);
+    const tabTitle = `SSH: ${profile.label || profile.host}`;
+    const newTab = getOrCreateTabData(newTabId, tabTitle);
+    newTab.isSsh = true;
+    newTab.sshHost = `${profile.username || 'root'}@${profile.host}:${profile.port || 22}`;
+    newTab.isRunning = true;
+    newTab.isPty = true;
+
+    // Envia criação de aba no servidor
+    ws.send(JSON.stringify({
+        action: 'create_tab',
+        newTabId: newTabId,
+        title: tabTitle,
+        cwd: '~'
+    }));
+
+    switchTab(newTabId);
+
+    // Envia comando de conexão SSH
+    setTimeout(() => {
+        const cols = (xterm && xterm.cols) ? xterm.cols : 80;
+        const rows = (xterm && xterm.rows) ? xterm.rows : 24;
+
+        ws.send(JSON.stringify({
+            tabId: newTabId,
+            action: 'ssh_connect',
+            host: profile.host,
+            port: profile.port || 22,
+            username: profile.username || 'root',
+            password: profile.password,
+            privateKey: profile.privateKey,
+            cols: cols,
+            rows: rows
+        }));
+
+        setProcessing(true);
+        openPtyView(`SSH ${profile.username || 'root'}@${profile.host}`);
+    }, 120);
+}
+
 
 // ==========================================
 // GERENCIADOR DE SNIPPETS & ATALHOS SALVOS

@@ -365,8 +365,9 @@ button, input {
 }
 
 /* 
- * 7. Estilos e Transições dos Modais (Snippets, Clipboard e Configurações)
+ * 7. Estilos e Transições dos Modais (SSH, Snippets, Clipboard e Configurações)
  */
+#ssh-modal.open,
 #snippets-modal.open,
 #clipboard-modal.open,
 #settings-modal.open {
@@ -374,6 +375,7 @@ button, input {
     opacity: 1;
 }
 
+#ssh-modal.open #ssh-sheet,
 #snippets-modal.open #snippets-sheet,
 #clipboard-modal.open #clipboard-sheet,
 #settings-modal.open #settings-sheet {
@@ -782,3 +784,21 @@ button, input {
     background-color: #374151;
     transform: scale(0.95);
 }
+
+/* ==========================================
+ * ESTILIZAÇÃO DO MODAL E GERENCIADOR SSH
+ * ========================================== */
+.ssh-profile-card {
+    transition: all 0.15s ease-out;
+}
+
+.ssh-profile-card:hover {
+    border-color: rgba(16, 185, 129, 0.4);
+    background-color: rgba(31, 41, 55, 0.95);
+}
+
+.tab-running-dot.ssh {
+    background-color: #10b981;
+    box-shadow: 0 0 8px #10b981;
+}
+
