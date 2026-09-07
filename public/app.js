@@ -389,10 +389,15 @@ const btnPtyScrollBottom = document.getElementById('btn-pty-scroll-bottom');
 function initXterm() {
     if (xterm || typeof Terminal === 'undefined') return;
 
+    // Tamanho e compressão de fonte otimizados para caber 80+ colunas no celular
+    const baseFontSize = window.innerWidth < 640 ? 11.5 : (currentFontSize || 13);
+
     xterm = new Terminal({
         cursorBlink: true,
-        fontFamily: 'monospace, "Courier New", Courier',
-        fontSize: currentFontSize || 13,
+        fontFamily: '"Cascadia Code", "Fira Code", "Ubuntu Mono", "DejaVu Sans Mono", "SF Mono", Menlo, Consolas, monospace',
+        fontSize: baseFontSize,
+        letterSpacing: -0.5,
+        lineHeight: 1.15,
         scrollback: 10000,
         smoothScrollDuration: 100,
         macOptionIsMeta: true,
