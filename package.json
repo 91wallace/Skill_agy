@@ -1,0 +1,17 @@
+{
+  "name": "termux-web-cli",
+  "version": "1.0.0",
+  "description": "Interface web interativa tipo PWA para o terminal nativo do Android via Termux",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "node-pty": "^1.1.0",
+    "ws": "^8.17.0"
+  }
+}

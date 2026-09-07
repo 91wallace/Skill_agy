@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+    <title>Termux Web CLI</title>
+    
+    <!-- Manifesto PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#111827">
+    <link rel="apple-touch-icon" href="icon.png">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- XTerm.js Local para emulação interativa TUI completa (agy, top, nano) -->
+    <link rel="stylesheet" href="xterm.css">
+    <script src="xterm.js"></script>
+    <script src="xterm-addon-fit.js"></script>
+    <link rel="stylesheet" href="styles.css?v=5.7">
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col font-mono overflow-hidden app-container">
+
+    <!-- Cabeçalho Superior com Abas Integradas (Browser / Editor Tab Bar) -->
+    <header class="bg-gray-950 px-2.5 pt-1.5 pb-0 flex items-center justify-between shadow-md border-b border-gray-800 z-10 shrink-0 select-none gap-2">
+        <!-- Lista de Abas com visual de aba real + Botão Nova Aba integrado -->
+        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar flex-1 min-w-0">
+            <div id="tabs-list" class="flex items-end gap-1 flex-shrink-0">
+                <!-- Abas inseridas dinamicamente via JS com formato de abas verdadeiras -->
+            </div>
+            <button id="btn-add-tab" type="button" class="btn-add-tab-header hover:bg-gray-800 text-gray-400 hover:text-green-400 p-1.5 rounded-lg text-xs font-bold shrink-0 flex items-center justify-center active:scale-90 transition-all ml-0.5 mb-1" title="Nova Aba (+)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Status de Conexão no canto direito -->
+        <div id="status-indicator" class="flex items-center text-xs shrink-0 pl-2 mb-1">
+            <span class="w-2 h-2 rounded-full bg-yellow-500 mr-1.5" id="status-dot"></span>
+            <span id="status-text" class="text-gray-400 text-[11px] hidden sm:inline">Conectando...</span>
+        </div>
+    </header>
+
+    <!-- Área do Terminal -->
+    <main id="terminal-container" class="flex-1 overflow-y-auto p-2 flex flex-col relative">
+        <!-- Barra de Comandos Anteriores (Espessura de 1 Linha com Dropdown Expansível e Altura Ergonômica) -->
+        <div id="past-commands-bar" class="hidden shrink-0 flex-col bg-gray-900/95 border border-gray-700/60 rounded-xl mb-2 text-xs transition-all shadow-md">
+            <div id="past-commands-header" class="flex items-center justify-between px-3 py-2 cursor-pointer select-none text-gray-400 hover:text-gray-200 transition-colors min-h-[36px]">
+                <div class="flex items-center gap-2 min-w-0 flex-1 truncate">
+                    <span id="past-commands-latest-text" class="truncate font-mono text-[12.5px] text-gray-200 flex-1"></span>
+                </div>
+                <button id="btn-toggle-past-commands" type="button" class="text-gray-400 hover:text-white p-1 ml-2 rounded-lg hover:bg-gray-800 transition-transform flex items-center justify-center" title="Ver todos os comandos anteriores">
+                    <svg class="past-chevron w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+            </div>
+            <!-- Lista descolapsável com todos os comandos anteriores -->
+            <div id="past-commands-list" class="hidden max-h-56 overflow-y-auto border-t border-gray-800/80 p-2 flex flex-col gap-1.5 font-mono text-xs">
+                <!-- Itens inseridos dinamicamente -->
+            </div>
+        </div>
+
+        <div id="terminal-output" class="whitespace-pre-wrap word-break leading-relaxed pb-2 flex flex-col gap-1"></div>
+
+        <!-- Árvore de Diretórios Flutuante (VS Code Explorer Flutuante com 1 Separador e Botão Fechar Maior) -->
+        <div id="directory-tree-panel" class="hidden bg-gray-900/95 border border-gray-700/80 rounded-xl shadow-2xl p-2.5 transition-all text-xs z-30">
+            <div class="flex justify-between items-center pb-2 border-b border-gray-800 text-[11.5px] text-gray-400 font-sans">
+                <div class="flex items-center gap-1.5 truncate">
+                    <button id="btn-tree-up" type="button" class="text-gray-400 hover:text-yellow-400 hover:bg-gray-800 p-1.5 rounded transition-colors flex items-center justify-center font-bold" title="Voltar ao diretório anterior (cd ..)">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                        </svg>
+                    </button>
+                    <svg class="tree-dir-icon w-4 h-4 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                    </svg>
+                    <span id="tree-current-cwd" class="text-gray-200 font-mono truncate font-medium">~</span>
+                </div>
+                <button id="btn-close-dir-tree" type="button" class="text-gray-400 hover:text-white hover:bg-gray-800/80 w-7 h-7 rounded-lg flex items-center justify-center font-bold text-lg leading-none transition-colors active:scale-90" title="Fechar visualização de diretórios">&times;</button>
+            </div>
+            <div id="directory-tree-content" class="flex flex-col gap-0.5 pt-2 max-h-60 overflow-y-auto">
+                <!-- Itens da árvore renderizados via JS -->
+            </div>
+        </div>
+        
+        <!-- Modal Flutuante do Terminal Interativo PTY (Xterm.js para agy, nano, top, htop) -->
+        <div id="pty-terminal-modal" class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 hidden opacity-0 transition-opacity duration-200">
+            <!-- Backdrop escuro com blur -->
+            <div id="pty-backdrop" class="absolute inset-0 bg-black/75 backdrop-blur-sm"></div>
+
+            <!-- Janela Flutuante que ocupa a maior parte da tela -->
+            <div id="pty-terminal-view" class="relative z-10 w-full h-full max-w-5xl max-h-[92vh] sm:max-h-[88vh] flex flex-col bg-black/95 border border-green-500/60 rounded-2xl shadow-2xl overflow-hidden transform scale-95 transition-transform duration-200">
+                <!-- Cabeçalho do Card PTY -->
+                <div class="flex items-center justify-between px-3.5 py-2.5 bg-gray-850 border-b border-gray-800 shrink-0 select-none">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse shrink-0"></span>
+                        <span id="pty-view-title" class="text-xs sm:text-sm font-bold text-green-400 font-mono truncate">Sessão Interativa (agy)</span>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button id="btn-pty-collapse" type="button" class="bg-gray-800 hover:bg-gray-700 text-gray-200 hover:text-green-400 text-xs px-2.5 py-1.5 rounded-lg font-mono font-medium active:scale-95 transition-all flex items-center gap-1.5 border border-gray-700 hover:border-green-500/50" title="Colapsar terminal interativo">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                            <span>Colapsar</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Contêiner do Canvas Xterm.js que preenche o espaço vertical disponível -->
+                <div id="xterm-container" class="flex-1 w-full min-h-0 p-2 bg-black overflow-hidden relative"></div>
+
+                <!-- Barra de Teclas Auxiliares Mobile (Facilitador de navegação no smartphone) -->
+                <div class="flex items-center gap-1.5 p-2 bg-gray-900 border-t border-gray-800 overflow-x-auto no-scrollbar shrink-0">
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono" data-key="\x1b">ESC</button>
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono" data-key="\t">TAB</button>
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 hover:text-red-400 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono font-medium" data-key="\x03" title="Sinal de Interrupção / Control">CTRL</button>
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono" data-key="\x1b[A">▲</button>
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono" data-key="\x1b[B">▼</button>
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono" data-key="\x1b[D">◀</button>
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono" data-key="\x1b[C">▶</button>
+                    <button type="button" class="pty-key-btn bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-2.5 py-1.5 rounded-md active:scale-95 transition-transform font-mono" data-key="\r">ENTER</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Painel Visual de Múltipla Escolha / Opções Interativas -->
+        <div id="interactive-options-panel" class="hidden bg-gray-900/95 border border-indigo-500/40 rounded-xl shadow-2xl p-3 my-2 flex flex-col gap-2 transition-all text-xs backdrop-blur-md">
+            <div class="flex justify-between items-center pb-2 border-b border-gray-800 text-[12px] font-sans">
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+                    <span id="options-panel-title" class="text-indigo-200 font-bold">Selecione uma opção:</span>
+                </div>
+                <!-- Countdown badge com animação circular/barra de tempo -->
+                <div id="options-timer-badge" class="flex items-center gap-1.5 bg-indigo-950/80 border border-indigo-500/30 px-2 py-0.5 rounded-full text-indigo-300 text-[11px] font-mono">
+                    <svg class="w-3 h-3 text-indigo-400 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                    </svg>
+                    <span>Auto em <strong id="options-timer-seconds">5s</strong></span>
+                </div>
+            </div>
+            
+            <!-- Barra de progresso do timer -->
+            <div id="options-timer-progress-bg" class="w-full bg-gray-800 rounded-full h-1 overflow-hidden">
+                <div id="options-timer-progress-bar" class="bg-indigo-500 h-full w-full transition-all duration-100 ease-linear"></div>
+            </div>
+
+            <!-- Lista de Botões de Opções -->
+            <div id="interactive-options-list" class="flex flex-col gap-1.5 pt-1">
+                <!-- Botões gerados dinamicamente via JS -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Controles Inferiores (Thumb-zone) -->
+    <footer class="bg-gray-800 p-2 border-t border-gray-700 flex flex-col gap-2 z-10 shrink-0 footer-safe relative">
+
+        <!-- Atalhos Rápidos -->
+        <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar items-center">
+            <button id="btn-snippets-toggle" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform flex items-center gap-1.5 font-semibold shadow-sm">
+                <svg class="w-3.5 h-3.5 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+                <span>Snippets</span>
+            </button>
+            <button id="btn-clipboard-toggle" class="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform flex items-center gap-1.5 font-semibold shadow-sm">
+                <svg class="w-3.5 h-3.5 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                </svg>
+                <span>Clipboard</span>
+            </button>
+            <button id="btn-clear" class="bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform">Limpar</button>
+            <button id="btn-cancel" class="bg-red-900 hover:bg-red-800 text-red-200 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform">Cancelar (Ctrl+C)</button>
+            <button class="shortcut-btn bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform" data-cmd="ls -la">ls -la</button>
+            <button class="shortcut-btn bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform" data-cmd="top -n 1">top</button>
+            <button id="btn-settings-toggle" class="bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white text-xs w-8 h-8 rounded-md shrink-0 active:scale-95 transition-transform flex items-center justify-center ml-auto shadow-sm" title="Configurações">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </button>
+        </div>
+        
+        <!-- Input de Comando -->
+        <div id="command-container" role="search" class="flex gap-2 w-full items-center">
+            <input type="search" id="command-input" class="flex-1 min-w-0 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition-colors" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" enterkeyhint="go">
+            <button id="btn-run" type="button" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-md text-sm font-bold active:scale-95 transition-transform shrink-0">Run</button>
+        </div>
+    </footer>
+
+    <!-- Modal / Bottom Sheet de Snippets (Comandos) -->
+    <div id="snippets-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
+        <!-- Backdrop clickable -->
+        <div id="snippets-backdrop" class="flex-1"></div>
+
+        <!-- Painel Bottom Sheet -->
+        <div class="bg-gray-900 border-t border-gray-700 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="snippets-sheet">
+            <!-- Barra Superior do Sheet -->
+            <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-850">
+                <span class="text-gray-100 font-bold text-sm">Comandos</span>
+                <div class="flex items-center gap-2">
+                    <button id="btn-toggle-delete-mode" class="bg-red-600 hover:bg-red-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">
+                        Deletar
+                    </button>
+                    <button id="btn-toggle-add-snippet" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">
+                        Novo
+                    </button>
+                    <button id="btn-close-snippets" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
+                </div>
+            </div>
+
+            <!-- Formulário Minimalista de Adicionar Snippet (Colapsável) -->
+            <div id="snippet-form-container" class="hidden p-3 bg-gray-800/80 border-b border-gray-700">
+                <div class="text-xs font-semibold text-gray-300 mb-2">Novo Snippet</div>
+                <div class="flex flex-col gap-2">
+                    <input type="text" id="snippet-name-input" placeholder="Nome (Ex: Status Git)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-100 focus:outline-none focus:border-blue-500">
+                    <input type="text" id="snippet-cmd-input" placeholder="Comando (Ex: git status)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-blue-500">
+                    <div class="flex justify-end gap-2 mt-1">
+                        <button id="btn-cancel-add-snippet" class="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300">Cancelar</button>
+                        <button id="btn-save-snippet" class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold">Salvar</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lista de Snippets -->
+            <div id="snippets-list" class="overflow-y-auto p-2 flex flex-col gap-1.5">
+                <!-- Injetado dinamicamente via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal / Bottom Sheet do Histórico da Área de Transferência (Clipboard) -->
+    <div id="clipboard-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
+        <div id="clipboard-backdrop" class="flex-1"></div>
+
+        <div class="bg-gray-900 border-t border-purple-500/40 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="clipboard-sheet">
+            <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-850">
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                    </svg>
+                    <span class="text-gray-100 font-bold text-sm">Histórico do Clipboard</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-clipboard-sync" class="bg-purple-700 hover:bg-purple-600 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium flex items-center gap-1" title="Colar do Sistema">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        <span>Sincronizar</span>
+                    </button>
+                    <button id="btn-clipboard-clear-all" class="bg-red-600/80 hover:bg-red-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">
+                        Limpar
+                    </button>
+                    <button id="btn-close-clipboard" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
+                </div>
+            </div>
+
+            <div id="clipboard-list" class="overflow-y-auto p-2 flex flex-col gap-1.5">
+                <!-- Injetado dinamicamente via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Configurações (Cores e Preferências) -->
+    <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
+        <div id="settings-backdrop" class="absolute inset-0"></div>
+
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col w-full max-w-sm z-10 overflow-hidden transform scale-95 transition-transform duration-200" id="settings-card">
+            <!-- Cabeçalho das Configurações -->
+            <div class="p-3.5 border-b border-gray-800 flex justify-between items-center bg-gray-850">
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    <span class="text-gray-100 font-bold text-sm">Personalização</span>
+                </div>
+                <button id="btn-close-settings" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
+            </div>
+
+            <!-- Corpo das Configurações -->
+            <div class="p-4 flex flex-col gap-4 overflow-y-auto max-h-[70vh] text-xs">
+                
+                <!-- Toggle: Mostrar Arquivos Ocultos -->
+                <div class="flex items-center justify-between p-2.5 bg-gray-800/60 border border-gray-700/60 rounded-xl">
+                    <div class="flex flex-col">
+                        <span class="text-gray-200 font-medium">Arquivos Ocultos</span>
+                        <span class="text-gray-400 text-[11px]">Exibir arquivos que começam com .</span>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-show-hidden" class="sr-only peer">
+                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600"></div>
+                    </label>
+                </div>
+
+                <!-- Cores da Linha de Comando (Prompt) -->
+                <div class="flex flex-col gap-2 p-3 bg-gray-800/40 border border-gray-700/40 rounded-xl">
+                    <span class="text-gray-200 font-semibold">Linha de Comando (Prompt)</span>
+                    <span class="text-gray-400 text-[11px]">Cor do prompt [diretório]$ comando</span>
+                    <div class="flex items-center gap-2 pt-1 flex-wrap" id="swatches-prompt">
+                        <!-- Cores do sistema e opções brilhantes -->
+                        <button type="button" class="color-swatch-btn" data-color="#facc15" style="background-color: #facc15;" title="Amarelo Padrão"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#00ff66" style="background-color: #00ff66;" title="Verde Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#22c55e" style="background-color: #22c55e;" title="Verde"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#00d4ff" style="background-color: #00d4ff;" title="Azul Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#3b82f6" style="background-color: #3b82f6;" title="Azul"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#ff3366" style="background-color: #ff3366;" title="Vermelho Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#ef4444" style="background-color: #ef4444;" title="Vermelho"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#c084fc" style="background-color: #c084fc;" title="Roxo"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#f3f4f6" style="background-color: #f3f4f6;" title="Branco"></button>
+                    </div>
+                </div>
+
+                <!-- Cores dos Diretórios (Pastas) -->
+                <div class="flex flex-col gap-2 p-3 bg-gray-800/40 border border-gray-700/40 rounded-xl">
+                    <span class="text-gray-200 font-semibold">Diretórios (Pastas)</span>
+                    <span class="text-gray-400 text-[11px]">Cor dos ícones e nomes de diretórios no explorador e terminal</span>
+                    <div class="flex items-center gap-2 pt-1 flex-wrap" id="swatches-dirs">
+                        <!-- Cores do sistema e opções brilhantes -->
+                        <button type="button" class="color-swatch-btn" data-color="#facc15" style="background-color: #facc15;" title="Amarelo"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#00ff66" style="background-color: #00ff66;" title="Verde Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#22c55e" style="background-color: #22c55e;" title="Verde"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#00d4ff" style="background-color: #00d4ff;" title="Azul Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#3b82f6" style="background-color: #3b82f6;" title="Azul"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#ff3366" style="background-color: #ff3366;" title="Vermelho Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#ef4444" style="background-color: #ef4444;" title="Vermelho"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#c084fc" style="background-color: #c084fc;" title="Roxo"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#f3f4f6" style="background-color: #f3f4f6;" title="Branco"></button>
+                    </div>
+                </div>
+
+                <!-- Cores dos Arquivos -->
+                <div class="flex flex-col gap-2 p-3 bg-gray-800/40 border border-gray-700/40 rounded-xl">
+                    <span class="text-gray-200 font-semibold">Arquivos</span>
+                    <span class="text-gray-400 text-[11px]">Cor dos arquivos e documentos no explorador e terminal</span>
+                    <div class="flex items-center gap-2 pt-1 flex-wrap" id="swatches-files">
+                        <!-- Cores do sistema e opções brilhantes -->
+                        <button type="button" class="color-swatch-btn" data-color="#9ca3af" style="background-color: #9ca3af;" title="Cinza Padrão"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#f3f4f6" style="background-color: #f3f4f6;" title="Branco"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#00d4ff" style="background-color: #00d4ff;" title="Azul Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#3b82f6" style="background-color: #3b82f6;" title="Azul"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#00ff66" style="background-color: #00ff66;" title="Verde Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#22c55e" style="background-color: #22c55e;" title="Verde"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#ff3366" style="background-color: #ff3366;" title="Vermelho Brilhante (Neon)"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#facc15" style="background-color: #facc15;" title="Amarelo"></button>
+                        <button type="button" class="color-swatch-btn" data-color="#c084fc" style="background-color: #c084fc;" title="Roxo"></button>
+                    </div>
+                </div>
+
+                <!-- Botão Restaurar Padrões -->
+                <button id="btn-reset-colors" type="button" class="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium text-xs border border-gray-700 transition-colors">
+                    Restaurar Cores Padrão
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=5.7"></script>
+</body>
+</html>

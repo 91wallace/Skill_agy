@@ -1,0 +1,784 @@
+/* public/styles.css */
+
+/* 
+ * 1. Altura e dimensionamento proporcional mobile (100dvh e fallback)
+ */
+html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    position: fixed; /* Evita que o browser faça scroll de janela inteira sobre o layout */
+}
+
+.app-container {
+    height: 100%;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* 
+ * 2. Suporte à Safe Area e Margem para Teclado (evita sobreposição)
+ */
+.footer-safe {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 
+ * 3. Ocultar barras de rolagem em contêineres horizontais (ex: barra de atalhos)
+ * Mantém a funcionalidade de scroll nativa intacta.
+ */
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;  /* IE e Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+
+:root {
+    --terminal-font-size: 13px;
+    --color-prompt-line: #facc15;     /* linha de comando / prompt amarelo padrão */
+    --color-dir-item: #facc15;        /* pastas na visualização de diretórios / amarelo padrão */
+    --color-file-item: #9ca3af;       /* arquivos na visualização de diretórios / cinza padrão */
+}
+
+#terminal-container {
+    touch-action: pan-y;
+    overflow-y: auto;
+    position: relative;
+}
+
+#terminal-output {
+    font-size: var(--terminal-font-size, 13px);
+    transition: font-size 0.05s ease-out;
+}
+
+/* Garantir que todos os ícones SVG do layout mantenham dimensionamento e renderização corretos */
+svg {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* Cor da linha de comando do terminal ([diretório]$ comando) e do botão V */
+.prompt-line {
+    color: var(--color-prompt-line, #facc15) !important;
+}
+.past-prompt-line {
+    color: var(--color-prompt-line, #facc15) !important;
+    padding: 2px 0;
+    font-size: var(--terminal-font-size, 13px);
+}
+.past-cmd-text {
+    color: #f3f4f6;
+    font-weight: 500;
+}
+.btn-inline-dir {
+    color: var(--color-prompt-line, #facc15) !important;
+}
+
+/* Customização de cores dinâmicas para árvore de diretórios, saídas de comandos e view do Antigravity */
+svg.tree-dir-icon,
+span.tree-dir-name,
+.ansi-dir,
+.ansi-blue,
+.ansi-bright-blue,
+.ansi-cyan,
+.ansi-bright-cyan,
+span.agy-dir-highlight,
+.process-card .agy-dir-highlight,
+.process-card .ansi-dir,
+.process-card .ansi-blue,
+.process-card .ansi-cyan {
+    color: var(--color-dir-item, #facc15) !important;
+}
+
+svg.tree-file-icon,
+span.tree-file-name,
+.ansi-file,
+.ansi-white,
+.ansi-bright-white,
+.ansi-gray,
+span.agy-file-highlight,
+.process-card .agy-file-highlight,
+.process-card .ansi-file,
+.process-card .ansi-white,
+.process-card .ansi-gray {
+    color: var(--color-file-item, #9ca3af) !important;
+}
+
+/* Barra de Abas Superior Integrada (Estilo Navegador / VS Code) */
+.tab-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px 6px 10px;
+    border-top-left-radius: 9px;
+    border-top-right-radius: 9px;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    font-size: 11.5px;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    background-color: rgba(31, 41, 55, 0.4);
+    color: #9ca3af;
+    border: 1px solid rgba(75, 85, 99, 0.35);
+    border-bottom: 1px solid transparent;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    user-select: none;
+    position: relative;
+    margin-bottom: -1px; /* Conecta suavemente com a borda inferior do header */
+}
+
+.tab-item:hover {
+    background-color: rgba(55, 65, 81, 0.6);
+    color: #e5e7eb;
+    border-color: rgba(107, 114, 128, 0.5);
+}
+
+.tab-item.active {
+    background-color: #111827; /* Mesma cor do background da área do terminal */
+    color: #4ade80;
+    border-color: #374151;
+    border-top: 2px solid #22c55e;
+    border-bottom: 1px solid #111827;
+    font-weight: 600;
+    z-index: 1;
+}
+
+.tab-item .tab-close-btn {
+    opacity: 0.5;
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-size: 13px;
+    line-height: 1;
+    transition: all 0.1s ease;
+    margin-left: 2px;
+}
+
+.tab-item .tab-close-btn:hover {
+    opacity: 1;
+    background-color: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+}
+
+.tab-running-dot {
+    width: 6.5px;
+    height: 6.5px;
+    border-radius: 9999px;
+    background-color: #eab308;
+    box-shadow: 0 0 5px #eab308;
+    animation: livePulse 1.2s infinite;
+    flex-shrink: 0;
+}
+
+.tab-running-dot.pty {
+    background-color: #10b981;
+    box-shadow: 0 0 6px #10b981;
+}
+
+.btn-add-tab-header {
+    border: 1px dashed rgba(75, 85, 99, 0.5);
+    background-color: transparent;
+    transition: all 0.15s ease;
+}
+
+.btn-add-tab-header:hover {
+    border-color: rgba(34, 197, 94, 0.6);
+    background-color: rgba(31, 41, 55, 0.7);
+}
+
+/* Barra de Comandos Anteriores (1 linha de espessura com colapso e visual moderno ergonômico) */
+#past-commands-bar {
+    border: 1px solid rgba(75, 85, 99, 0.45);
+    background: rgba(17, 24, 39, 0.95);
+    backdrop-filter: blur(10px);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#past-commands-bar.open {
+    border-color: rgba(99, 102, 241, 0.5);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+#past-commands-bar.open .past-chevron {
+    transform: rotate(180deg);
+}
+
+.past-history-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+    border: 1px solid rgba(75, 85, 99, 0.3);
+    background-color: rgba(31, 41, 55, 0.4);
+}
+
+.past-history-row:hover {
+    background-color: rgba(55, 65, 81, 0.7);
+    border-color: rgba(75, 85, 99, 0.6);
+}
+
+.past-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.past-history-output {
+    max-height: 200px;
+    overflow-y: auto;
+    background-color: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(75, 85, 99, 0.4);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11.5px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.ansi-green,
+.ansi-bright-green {
+    color: #4ade80;
+}
+
+.ansi-red,
+.ansi-bright-red {
+    color: #f87171;
+}
+
+.ansi-yellow,
+.ansi-bright-yellow {
+    color: #facc15;
+}
+
+.ansi-magenta,
+.ansi-bright-magenta {
+    color: #c084fc;
+}
+
+/* Campos de cor e círculos pré-selecionáveis 100% redondos */
+.color-swatch-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.color-swatch-btn:hover {
+    transform: scale(1.15);
+}
+.color-swatch-btn:active {
+    transform: scale(0.95);
+}
+.color-swatch-btn.active {
+    border-color: #ffffff;
+    box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.6);
+}
+
+.round-color-picker-wrapper {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    border-radius: 9999px;
+    overflow: hidden;
+    border: 2px solid #4b5563;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.round-color-picker-wrapper:hover {
+    border-color: #9ca3af;
+    transform: scale(1.05);
+}
+.round-color-picker {
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    background: transparent;
+}
+.round-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+.round-color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: 9999px;
+}
+
+/* 
+ * 4. Comportamento do Terminal
+ * Garante que saídas de comando longas não quebrem o layout horizontal da tela.
+ */
+.word-break {
+    word-wrap: break-word;
+    word-break: break-all;
+    white-space: pre-wrap; /* Preserva formatação, mas permite quebra */
+}
+
+/* 
+ * 5. Ajuste fino de toques e foco no mobile
+ */
+button, input {
+    -webkit-tap-highlight-color: transparent;
+    font-size: 16px; /* Evita que o Safari/Chrome no iOS/Android dê zoom automático no foco */
+}
+
+/* 
+ * 6. Animação personalizada para o status "Processando"
+ */
+@keyframes pulse-fast {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+.animate-pulse-fast {
+    animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Cores de status para o JavaScript injetar via classe */
+.status-connected {
+    background-color: #4ade80; /* bg-green-400 */
+}
+.status-disconnected {
+    background-color: #ef4444; /* bg-red-500 */
+}
+.status-processing {
+    background-color: #eab308; /* bg-yellow-500 */
+}
+
+/* 
+ * 7. Estilos e Transições dos Modais (Snippets, Clipboard e Configurações)
+ */
+#snippets-modal.open,
+#clipboard-modal.open,
+#settings-modal.open {
+    display: flex;
+    opacity: 1;
+}
+
+#snippets-modal.open #snippets-sheet,
+#clipboard-modal.open #clipboard-sheet,
+#settings-modal.open #settings-sheet {
+    transform: translateY(0);
+}
+
+.snippet-item,
+.clipboard-item {
+    transition: background-color 0.15s ease, transform 0.1s ease;
+}
+/* 
+ * 8. Estilos da Árvore de Diretórios (VS Code Explorer Flutuante)
+ */
+#directory-tree-panel {
+    position: absolute;
+    top: 48px;
+    left: 8px;
+    right: 8px;
+    z-index: 40;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.7), 0 4px 10px -2px rgba(0, 0, 0, 0.5);
+    animation: fadeInTree 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeInTree {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.tree-node {
+    user-select: none;
+}
+.tree-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s ease;
+    border-radius: 4px;
+}
+.tree-chevron.expanded {
+    transform: rotate(90deg);
+}
+.tree-chevron:active {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.tree-folder-title:hover {
+    color: #60a5fa;
+}
+.tree-folder-title:active {
+    opacity: 0.8;
+}
+
+/* Botão estilo V de colapsar/descolapsar da linha amarela */
+.btn-inline-dir .chevron-toggle {
+    display: inline-block;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: center;
+}
+.btn-inline-dir.open .chevron-toggle {
+    transform: rotate(180deg);
+}
+
+/* 
+ * 9. Process / Command Card (Estilo Antigravity 2 Linhas com Ticker e Painel Expansível)
+ */
+.process-card {
+    border-radius: 12px;
+    border: 1px solid rgba(75, 85, 99, 0.5);
+    background: rgba(17, 24, 39, 0.95);
+    overflow: hidden;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    user-select: text;
+}
+
+.process-card:hover {
+    border-color: rgba(107, 114, 128, 0.8);
+}
+
+.process-card-header {
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    user-select: none;
+}
+
+/* Linha 1: Ticker com animação de subida suave */
+.process-card-line1 {
+    height: 32px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+    background: rgba(15, 23, 42, 0.6);
+    border-bottom: 1px solid rgba(55, 65, 81, 0.6);
+}
+
+.process-ticker-wrapper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+}
+
+.process-ticker-text {
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11.5px;
+    color: #e2e8f0;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Animação: linha anterior subindo e esmaecendo */
+.process-ticker-exit {
+    transform: translateY(-100%);
+    opacity: 0;
+    position: absolute;
+    top: 6px;
+    left: 0;
+}
+
+/* Animação: nova linha vindo de baixo */
+.process-ticker-enter {
+    transform: translateY(100%);
+    opacity: 0;
+}
+.process-ticker-active {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+/* Linha 2: Faixa inferior cinza mais clara */
+.process-card-line2 {
+    background: #374151; /* Tom cinza mais claro */
+    color: #f3f4f6;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+}
+
+.process-card-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+}
+
+.process-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #60a5fa;
+    border-radius: 50%;
+    animation: process-spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes process-spin {
+    to { transform: rotate(360deg); }
+}
+
+.process-status-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.process-percent-badge {
+    background: rgba(59, 130, 246, 0.25);
+    border: 1px solid rgba(59, 130, 246, 0.5);
+    color: #93c5fd;
+    font-weight: 700;
+    font-size: 10px;
+    padding: 0.5px 5px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+}
+
+.process-duration-badge {
+    color: #d1d5db;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.process-cmd-badge {
+    color: #f9fafb;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+}
+
+.process-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.process-live-badge:hover {
+    background: rgba(16, 185, 129, 0.25);
+    border-color: #10b981;
+}
+
+.process-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background-color: #10b981;
+    box-shadow: 0 0 6px #10b981;
+    animation: livePulse 1.5s infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.4;
+        transform: scale(0.85);
+    }
+}
+
+.process-expand-chevron {
+    color: #9ca3af;
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.process-card.expanded .process-expand-chevron {
+    transform: rotate(180deg);
+}
+
+/* Painel de Output Expandido */
+.process-card-body {
+    display: none;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #0f172a;
+    padding: 10px;
+    font-size: var(--terminal-font-size, 13px);
+    border-top: 1px solid rgba(75, 85, 99, 0.4);
+    user-select: text;
+}
+
+.process-card.expanded .process-card-body {
+    display: block;
+}
+
+/* Painel de Opções Interativas / Múltipla Escolha */
+#interactive-options-panel {
+    animation: fadeInOptions 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeInOptions {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.option-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 10px 12px;
+    background-color: rgba(31, 41, 55, 0.85);
+    border: 1px solid rgba(75, 85, 99, 0.5);
+    border-radius: 8px;
+    color: #f3f4f6;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.option-btn:hover {
+    background-color: rgba(55, 65, 81, 0.95);
+    border-color: rgba(99, 102, 241, 0.6);
+}
+
+.option-btn:active {
+    transform: scale(0.98);
+}
+
+.option-btn.selected-default {
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.25) 0%, rgba(31, 41, 55, 0.9) 100%);
+    border-color: #6366f1;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
+}
+
+.option-btn-key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background-color: rgba(55, 65, 81, 0.8);
+    color: #a5b4fc;
+    font-weight: 700;
+    font-size: 11px;
+    margin-right: 10px;
+    flex-shrink: 0;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.option-btn.selected-default .option-btn-key {
+    background-color: #6366f1;
+    color: #ffffff;
+    border-color: #818cf8;
+}
+
+.option-btn-label {
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.option-btn-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 9999px;
+    background-color: rgba(99, 102, 241, 0.2);
+    color: #c7d2fe;
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    font-weight: 600;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+
+/* ==========================================
+ * ESTILIZAÇÃO DO MODAL FLUTUANTE DO TERMINAL PTY (XTERM.JS)
+ * ========================================== */
+#pty-terminal-modal {
+    touch-action: pan-y;
+}
+
+#pty-terminal-view {
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(34, 197, 94, 0.2);
+}
+
+#xterm-container {
+    background-color: #000000;
+}
+
+.xterm {
+    padding: 6px;
+    height: 100%;
+    width: 100%;
+}
+
+.xterm-viewport {
+    background-color: #000000 !important;
+}
+
+.pty-key-btn {
+    border: 1px solid rgba(75, 85, 99, 0.6);
+    user-select: none;
+    font-weight: 600;
+}
+
+.pty-key-btn:active {
+    background-color: #374151;
+    transform: scale(0.95);
+}
