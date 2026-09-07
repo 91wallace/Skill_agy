@@ -20,12 +20,53 @@ const wss = new WebSocket.Server({ server });
 const MAX_LOG_HISTORY = 1000;
 const sessions = new Map(); // tabId -> SessionObject
 
-function createSession(tabId, title = 'Terminal 1', initialCwd = null) {
+// Detecção do ambiente de execução do sistema hospedeiro (Termux, Proot, Distro Linux)
+function getHostEnvironmentType() {
+    const isTermux = !!(process.env.TERMUX_VERSION || (process.env.PREFIX && process.env.PREFIX.includes('com.termux')) || fs.existsSync('/data/data/com.termux/files/usr/bin/bash'));
+    
+    // Se estiver em proot ou chroot
+    const isProot = fs.existsSync('/proot') || (process.env.PROOT_TMP_DIR !== undefined) || (process.env.PRUN !== undefined);
+
+    let distroName = 'Linux';
+    try {
+        if (fs.existsSync('/etc/os-release')) {
+            const osRelease = fs.readFileSync('/etc/os-release', 'utf8');
+            const nameMatch = osRelease.match(/^(?:NAME|ID)=(?:")?([^"\n\r]+)(?:")?/m);
+            if (nameMatch && nameMatch[1]) {
+                const rawName = nameMatch[1].trim();
+                // Normaliza nomes conhecidos
+                if (/ubuntu/i.test(rawName)) distroName = 'Ubuntu';
+                else if (/debian/i.test(rawName)) distroName = 'Debian';
+                else if (/arch/i.test(rawName)) distroName = 'Arch';
+                else if (/alpine/i.test(rawName)) distroName = 'Alpine';
+                else if (/fedora/i.test(rawName)) distroName = 'Fedora';
+                else if (/kali/i.test(rawName)) distroName = 'Kali';
+                else if (/void/i.test(rawName)) distroName = 'Void';
+                else distroName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+            }
+        }
+    } catch (e) {}
+
+    if (isTermux && !isProot) {
+        return { type: 'termux', label: 'Termux' };
+    } else if (isProot) {
+        return { type: 'distro', label: `${distroName} (PRoot)` };
+    } else {
+        return { type: 'distro', label: distroName };
+    }
+}
+
+const hostEnv = getHostEnvironmentType();
+
+function createSession(tabId, title = null, initialCwd = null) {
     const defaultCwd = initialCwd || process.env.HOME || process.cwd();
+    const defaultTitle = title || `${hostEnv.label} ${sessions.size + 1}`;
     const session = {
         id: tabId,
-        title: title,
+        title: defaultTitle,
         cwd: defaultCwd,
+        envType: hostEnv.type, // 'termux' | 'distro' | 'ssh'
+        envLabel: hostEnv.label,
         currentProcess: null,
         isCurrentProcessPty: false,
         isSsh: false,
@@ -40,7 +81,7 @@ function createSession(tabId, title = 'Terminal 1', initialCwd = null) {
 }
 
 // Inicializa a primeira sessão padrão
-createSession('tab-1', 'Terminal 1');
+createSession('tab-1');
 
 // Formata caminho encurtado exibindo os dois últimos diretórios sem barra inicial (ex: projects/Skill_agy)
 function formatShortCwd(fullPath) {
@@ -80,6 +121,8 @@ function broadcastTabsList() {
         id: s.id,
         title: s.title,
         cwd: s.cwd,
+        envType: s.isSsh ? 'ssh' : (s.envType || hostEnv.type),
+        envLabel: s.isSsh ? 'SSH' : (s.envLabel || hostEnv.label),
         isRunning: (s.currentProcess !== null) || (s.isSsh && s.sshClient !== null),
         isPty: s.isCurrentProcessPty || s.isSsh,
         isSsh: !!s.isSsh,
@@ -104,6 +147,8 @@ wss.on('connection', (ws) => {
             type: 'history',
             tabId: session.id,
             title: session.title,
+            envType: session.isSsh ? 'ssh' : (session.envType || hostEnv.type),
+            envLabel: session.isSsh ? 'SSH' : (session.envLabel || hostEnv.label),
             data: session.logHistory,
             cwd: session.cwd,
             isRunning: (session.currentProcess !== null) || (session.isSsh && session.sshClient !== null),
@@ -128,7 +173,7 @@ wss.on('connection', (ws) => {
         // Ação: Criar nova aba
         if (parsed.action === 'create_tab') {
             const newTabId = parsed.newTabId || ('tab-' + Date.now().toString(36));
-            const tabTitle = parsed.title || `Terminal ${sessions.size + 1}`;
+            const tabTitle = parsed.title || `${hostEnv.label} ${sessions.size + 1}`;
             const initialCwd = parsed.cwd || (session ? session.cwd : null);
             const newSession = createSession(newTabId, tabTitle, initialCwd);
             broadcastTabsList();
@@ -136,6 +181,8 @@ wss.on('connection', (ws) => {
                 type: 'tab_created',
                 tabId: newTabId,
                 title: tabTitle,
+                envType: newSession.envType,
+                envLabel: newSession.envLabel,
                 cwd: newSession.cwd,
                 isRunning: false,
                 isPty: false,
@@ -219,6 +266,8 @@ wss.on('connection', (ws) => {
             }
 
             session.isSsh = true;
+            session.envType = 'ssh';
+            session.envLabel = 'SSH';
             session.sshHost = `${username}@${host}:${port}`;
             session.title = `SSH: ${username}@${host}`;
             session.isCurrentProcessPty = true;

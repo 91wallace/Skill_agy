@@ -142,12 +142,27 @@ span.agy-file-highlight,
 
 .tab-item.active {
     background-color: #111827; /* Mesma cor do background da área do terminal */
-    color: #4ade80;
+    color: #f3f4f6;
     border-color: #374151;
     border-top: 2px solid #22c55e;
     border-bottom: 1px solid #111827;
     font-weight: 600;
     z-index: 1;
+}
+
+.tab-item.tab-env-termux.active {
+    border-top-color: #06b6d4; /* Ciano para Termux */
+    color: #67e8f9;
+}
+
+.tab-item.tab-env-distro.active {
+    border-top-color: #f97316; /* Laranja Ubuntu/Debian/Linux */
+    color: #fdba74;
+}
+
+.tab-item.tab-env-ssh.active {
+    border-top-color: #10b981; /* Verde Esmeralda para SSH */
+    color: #6ee7b7;
 }
 
 .tab-item .tab-close-btn {

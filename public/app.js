@@ -8,14 +8,16 @@ const tabsListContainer = document.getElementById('tabs-list');
 const btnAddTab = document.getElementById('btn-add-tab');
 
 let activeTabId = 'tab-1';
-const tabsMap = new Map(); // tabId -> { id, title, cwd, isRunning, isPty, isSsh, sshHost, logsHtml: '', pastCommands: [], activeCmd: null, activeProcessCardState: null }
+const tabsMap = new Map(); // tabId -> { id, title, cwd, envType, envLabel, isRunning, isPty, isSsh, sshHost, logsHtml: '', pastCommands: [], activeCmd: null, activeProcessCardState: null }
 
-function getOrCreateTabData(tabId, title = 'Terminal 1') {
+function getOrCreateTabData(tabId, title = null) {
     if (!tabsMap.has(tabId)) {
         tabsMap.set(tabId, {
             id: tabId,
             title: title || 'Terminal',
             cwd: '~',
+            envType: 'termux', // 'termux' | 'distro' | 'ssh'
+            envLabel: 'Terminal',
             isRunning: false,
             isPty: false,
             isSsh: false,
@@ -30,7 +32,37 @@ function getOrCreateTabData(tabId, title = 'Terminal 1') {
 }
 
 // Inicializa a primeira aba
-getOrCreateTabData('tab-1', 'Terminal 1');
+getOrCreateTabData('tab-1');
+
+// Retorna o SVG de ícone e tag correspondente ao tipo de ambiente
+function getEnvBadgeInfo(tab) {
+    const isSsh = tab.isSsh || tab.envType === 'ssh';
+    if (isSsh) {
+        return {
+            type: 'ssh',
+            badgeClass: 'tab-env-ssh',
+            iconSvg: `<svg class="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>`
+        };
+    }
+
+    const env = (tab.envType || '').toLowerCase();
+    const label = (tab.envLabel || '').toLowerCase();
+
+    if (env === 'distro' || label.includes('ubuntu') || label.includes('debian') || label.includes('arch') || label.includes('proot') || label.includes('alpine') || label.includes('linux')) {
+        return {
+            type: 'distro',
+            badgeClass: 'tab-env-distro',
+            iconSvg: `<svg class="w-3.5 h-3.5 text-orange-400 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>`
+        };
+    }
+
+    // Padrão Termux
+    return {
+        type: 'termux',
+        badgeClass: 'tab-env-termux',
+        iconSvg: `<svg class="w-3.5 h-3.5 text-cyan-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>`
+    };
+}
 
 function renderTabsBar() {
     if (!tabsListContainer) return;
@@ -39,7 +71,8 @@ function renderTabsBar() {
     tabsMap.forEach((tab, id) => {
         const tabEl = document.createElement('div');
         const isActive = id === activeTabId;
-        tabEl.className = `tab-item ${isActive ? 'active' : ''}`;
+        const envInfo = getEnvBadgeInfo(tab);
+        tabEl.className = `tab-item ${isActive ? 'active' : ''} ${envInfo.badgeClass}`;
         
         let statusIndicator = '';
         if (tab.isSsh) {
@@ -52,7 +85,8 @@ function renderTabsBar() {
 
         tabEl.innerHTML = `
             ${statusIndicator}
-            <span class="truncate max-w-[120px]">${escapeHtml(tab.title || id)}</span>
+            ${envInfo.iconSvg}
+            <span class="truncate max-w-[120px] font-mono">${escapeHtml(tab.title || id)}</span>
             ${canClose ? `<span class="tab-close-btn" title="Fechar aba">&times;</span>` : ''}
         `;
 
@@ -531,6 +565,8 @@ function connect() {
                     const existing = getOrCreateTabData(t.id, t.title);
                     existing.title = t.title || existing.title;
                     existing.cwd = t.cwd || existing.cwd;
+                    existing.envType = t.envType || existing.envType;
+                    existing.envLabel = t.envLabel || existing.envLabel;
                     existing.isRunning = t.isRunning;
                     existing.isPty = t.isPty;
                     existing.isSsh = !!t.isSsh;
@@ -545,6 +581,8 @@ function connect() {
         if (parsed.type === 'tab_created') {
             const newTab = getOrCreateTabData(parsed.tabId, parsed.title);
             newTab.isSsh = !!parsed.isSsh;
+            newTab.envType = parsed.envType || newTab.envType;
+            newTab.envLabel = parsed.envLabel || newTab.envLabel;
             renderTabsBar();
             return;
         }
@@ -569,6 +607,8 @@ function connect() {
             targetTab.isPty = !!parsed.isPty;
             targetTab.isSsh = !!parsed.isSsh;
             targetTab.sshHost = parsed.sshHost || null;
+            if (parsed.envType) targetTab.envType = parsed.envType;
+            if (parsed.envLabel) targetTab.envLabel = parsed.envLabel;
             if (parsed.cwd) {
                 targetTab.cwd = parsed.cwd;
             }
