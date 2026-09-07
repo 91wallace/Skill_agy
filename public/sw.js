@@ -1,5 +1,5 @@
 // public/sw.js
-const CACHE_NAME = 'termux-web-cli-v28';
+const CACHE_NAME = 'termux-web-cli-v29';
 const ASSETS = [
     './',
     './index.html',
