@@ -60,7 +60,7 @@ const hostEnv = getHostEnvironmentType();
 
 function createSession(tabId, title = null, initialCwd = null) {
     const defaultCwd = initialCwd || process.env.HOME || process.cwd();
-    const defaultTitle = title || `${hostEnv.label} ${sessions.size + 1}`;
+    const defaultTitle = title || hostEnv.label;
     const session = {
         id: tabId,
         title: defaultTitle,
@@ -173,7 +173,7 @@ wss.on('connection', (ws) => {
         // Ação: Criar nova aba
         if (parsed.action === 'create_tab') {
             const newTabId = parsed.newTabId || ('tab-' + Date.now().toString(36));
-            const tabTitle = parsed.title || `${hostEnv.label} ${sessions.size + 1}`;
+            const tabTitle = parsed.title || hostEnv.label;
             const initialCwd = parsed.cwd || (session ? session.cwd : null);
             const newSession = createSession(newTabId, tabTitle, initialCwd);
             broadcastTabsList();
@@ -223,7 +223,7 @@ wss.on('connection', (ws) => {
                 sessions.delete(targetTabId);
                 // Garante que sempre exista ao menos 1 aba ativa
                 if (sessions.size === 0) {
-                    createSession('tab-1', 'Terminal 1');
+                    createSession('tab-1');
                 }
                 broadcastTabsList();
                 const json = JSON.stringify({ type: 'tab_closed', tabId: targetTabId });
@@ -236,7 +236,7 @@ wss.on('connection', (ws) => {
 
         // Se a sessão não existir para as demais ações, cria dinamicamente
         if (!session) {
-            session = createSession(tabId, `Terminal ${sessions.size + 1}`);
+            session = createSession(tabId, hostEnv.label);
             broadcastTabsList();
         }
 

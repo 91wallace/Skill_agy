@@ -139,15 +139,13 @@ function switchTab(newTabId) {
 
 function createNewTab() {
     const newId = 'tab-' + Date.now().toString(36);
-    const newTitle = `Terminal ${tabsMap.size + 1}`;
-    const newTabData = getOrCreateTabData(newId, newTitle);
+    const newTabData = getOrCreateTabData(newId);
     newTabData.cwd = activeCwd || '~';
 
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
             action: 'create_tab',
             newTabId: newId,
-            title: newTitle,
             cwd: activeCwd || null
         }));
     }
