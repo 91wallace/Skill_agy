@@ -48,17 +48,16 @@ function getEnvBadgeInfo(tab) {
     const env = (tab.envType || '').toLowerCase();
     const label = (tab.envLabel || '').toLowerCase();
 
-    // Ícone do Ubuntu Outline (Circle of Friends em traço / contorno laranja)
+    // Ícone do Ubuntu Outline sem círculo externo (Apenas os 3 amigos e o anel central)
     if (label.includes('ubuntu') || (env === 'distro' && label.includes('ubuntu'))) {
         return {
             type: 'ubuntu',
             badgeClass: 'tab-env-distro',
-            iconSvg: `<svg class="w-3.5 h-3.5 shrink-0 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="9.5"/>
-                <circle cx="12" cy="12" r="4.2"/>
-                <circle cx="5" cy="12" r="1.5" fill="currentColor"/>
-                <circle cx="15.5" cy="6" r="1.5" fill="currentColor"/>
-                <circle cx="15.5" cy="18" r="1.5" fill="currentColor"/>
+            iconSvg: `<svg class="w-3.5 h-3.5 shrink-0 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="6"/>
+                <circle cx="4.5" cy="12" r="2" fill="currentColor"/>
+                <circle cx="15.75" cy="5.5" r="2" fill="currentColor"/>
+                <circle cx="15.75" cy="18.5" r="2" fill="currentColor"/>
             </svg>`
         };
     }
