@@ -389,15 +389,14 @@ const btnPtyScrollBottom = document.getElementById('btn-pty-scroll-bottom');
 function initXterm() {
     if (xterm || typeof Terminal === 'undefined') return;
 
-    // Tamanho e compressão de fonte otimizados para caber 80+ colunas no celular
-    const baseFontSize = window.innerWidth < 640 ? 11.5 : (currentFontSize || 13);
+    const baseFontSize = window.innerWidth < 640 ? 12 : (currentFontSize || 13);
 
     xterm = new Terminal({
         cursorBlink: true,
-        fontFamily: '"Cascadia Code", "Fira Code", "Ubuntu Mono", "DejaVu Sans Mono", "SF Mono", Menlo, Consolas, monospace',
+        fontFamily: 'monospace, "Courier New", Courier',
         fontSize: baseFontSize,
-        letterSpacing: -0.5,
-        lineHeight: 1.15,
+        letterSpacing: 0,
+        lineHeight: 1.2,
         scrollback: 10000,
         smoothScrollDuration: 100,
         macOptionIsMeta: true,
@@ -860,29 +859,31 @@ function setProcessing(state) {
     }
 }
 
-// Parser minimalista de sequências de escape ANSI para suporte a cores no terminal (ex: ls --color)
+// Parser completo de sequências de escape ANSI para suporte a todas as cores do terminal (ls, agy, top, etc.)
 function parseAnsiToHtml(text) {
-    const ansiColorMap = {
+    const standardAnsiColors = {
         '30': 'ansi-black',
         '31': 'ansi-red',
         '32': 'ansi-green',
         '33': 'ansi-yellow',
-        '34': 'ansi-dir',           // Azul (diretórios no ls) mapeado para cor customizada
+        '34': 'ansi-blue',
         '35': 'ansi-magenta',
         '36': 'ansi-cyan',
-        '37': 'ansi-file',          // Branco/cinza (arquivos no ls) mapeado para cor customizada
-        '90': 'ansi-file',          // Cinza claro mapeado para cor de arquivo
+        '37': 'ansi-white',
+        '90': 'ansi-bright-black',
         '91': 'ansi-bright-red',
         '92': 'ansi-bright-green',
         '93': 'ansi-bright-yellow',
-        '94': 'ansi-dir',           // Azul brilhante mapeado para diretórios
+        '94': 'ansi-bright-blue',
         '95': 'ansi-bright-magenta',
         '96': 'ansi-bright-cyan',
-        '97': 'ansi-file'
+        '97': 'ansi-bright-white'
     };
 
     let result = '';
     let currentClasses = [];
+    let currentStyle = '';
+
     // Regex para capturar sequências ANSI do tipo \x1b[...m
     const tokens = text.split(/(\x1b\[[0-9;]*m)/g);
 
@@ -890,33 +891,44 @@ function parseAnsiToHtml(text) {
         if (!token) continue;
         const match = token.match(/^\x1b\[([0-9;]*)m$/);
         if (match) {
-            const rawCodes = match[1] ? match[1].split(';') : ['0'];
-            for (let rawCode of rawCodes) {
-                // Normaliza "01" -> "1", "00" -> "0"
-                const code = rawCode.replace(/^0+([1-9])/, '$1').trim();
-                if (code === '0' || code === '' || rawCode === '00') {
+            const rawCodes = match[1] ? match[1].split(';').map(c => parseInt(c, 10) || 0) : [0];
+            for (let i = 0; i < rawCodes.length; i++) {
+                const code = rawCodes[i];
+                if (code === 0) {
                     currentClasses = [];
-                } else if (code === '34' || code === '94') {
-                    // Diretório
-                    currentClasses = currentClasses.filter(c => !c.startsWith('ansi-'));
-                    currentClasses.push('ansi-dir');
-                } else if (code === '37' || code === '90' || code === '97') {
-                    // Arquivo normal
-                    currentClasses = currentClasses.filter(c => !c.startsWith('ansi-'));
-                    currentClasses.push('ansi-file');
-                } else if (ansiColorMap[code]) {
-                    currentClasses = currentClasses.filter(c => !c.startsWith('ansi-'));
-                    currentClasses.push(ansiColorMap[code]);
-                } else if (code === '1') {
+                    currentStyle = '';
+                } else if (code === 1) {
                     if (!currentClasses.includes('font-bold')) currentClasses.push('font-bold');
-                } else if (code === '4') {
+                } else if (code === 4) {
                     if (!currentClasses.includes('underline')) currentClasses.push('underline');
+                } else if (standardAnsiColors[String(code)]) {
+                    currentClasses = currentClasses.filter(c => !c.startsWith('ansi-'));
+                    currentClasses.push(standardAnsiColors[String(code)]);
+                    currentStyle = '';
+                } else if (code === 38 && rawCodes[i + 1] === 5 && rawCodes[i + 2] !== undefined) {
+                    // ANSI 256 cores (38;5;N)
+                    const colorIdx = rawCodes[i + 2];
+                    i += 2;
+                    currentClasses = currentClasses.filter(c => !c.startsWith('ansi-'));
+                    currentStyle = `color: var(--ansi-256-${colorIdx}, inherit);`;
+                } else if (code === 38 && rawCodes[i + 1] === 2 && rawCodes[i + 4] !== undefined) {
+                    // ANSI TrueColor (38;2;R;G;B)
+                    const r = rawCodes[i + 2], g = rawCodes[i + 3], b = rawCodes[i + 4];
+                    i += 4;
+                    currentClasses = currentClasses.filter(c => !c.startsWith('ansi-'));
+                    currentStyle = `color: rgb(${r}, ${g}, ${b});`;
+                } else if (code === 39) {
+                    // Reset foreground color
+                    currentClasses = currentClasses.filter(c => !c.startsWith('ansi-'));
+                    currentStyle = '';
                 }
             }
         } else {
             const escaped = escapeHtml(token);
-            if (currentClasses.length > 0) {
-                result += `<span class="${currentClasses.join(' ')}">${escaped}</span>`;
+            if (currentClasses.length > 0 || currentStyle) {
+                const classAttr = currentClasses.length > 0 ? ` class="${currentClasses.join(' ')}"` : '';
+                const styleAttr = currentStyle ? ` style="${currentStyle}"` : '';
+                result += `<span${classAttr}${styleAttr}>${escaped}</span>`;
             } else {
                 result += escaped;
             }
@@ -983,7 +995,7 @@ function createProcessCard(cmdText, isRunning = true) {
     const body = document.createElement('div');
     body.className = 'process-card-body';
     const bodyPre = document.createElement('pre');
-    bodyPre.className = 'whitespace-pre-wrap word-break leading-relaxed m-0 p-0 font-mono';
+    bodyPre.className = 'whitespace-pre overflow-x-auto leading-relaxed m-0 p-0 font-mono';
     body.appendChild(bodyPre);
 
     card.appendChild(header);

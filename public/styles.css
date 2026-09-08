@@ -79,33 +79,37 @@ svg {
     color: var(--color-prompt-line, #facc15) !important;
 }
 
+/* Cores ANSI do Terminal */
+.ansi-black { color: #4b5563; }
+.ansi-red { color: #ef4444; }
+.ansi-green { color: #22c55e; }
+.ansi-yellow { color: #eab308; }
+.ansi-blue { color: #3b82f6; }
+.ansi-magenta { color: #d946ef; }
+.ansi-cyan { color: #06b6d4; }
+.ansi-white { color: #e5e7eb; }
+
+.ansi-bright-black { color: #6b7280; }
+.ansi-bright-red { color: #f87171; }
+.ansi-bright-green { color: #4ade80; }
+.ansi-bright-yellow { color: #fde047; }
+.ansi-bright-blue { color: #60a5fa; }
+.ansi-bright-magenta { color: #f472b6; }
+.ansi-bright-cyan { color: #22d3ee; }
+.ansi-bright-white { color: #ffffff; }
+
 /* Customização de cores dinâmicas para árvore de diretórios, saídas de comandos e view do Antigravity */
 svg.tree-dir-icon,
 span.tree-dir-name,
-.ansi-dir,
-.ansi-blue,
-.ansi-bright-blue,
-.ansi-cyan,
-.ansi-bright-cyan,
 span.agy-dir-highlight,
-.process-card .agy-dir-highlight,
-.process-card .ansi-dir,
-.process-card .ansi-blue,
-.process-card .ansi-cyan {
+.process-card .agy-dir-highlight {
     color: var(--color-dir-item, #facc15) !important;
 }
 
 svg.tree-file-icon,
 span.tree-file-name,
-.ansi-file,
-.ansi-white,
-.ansi-bright-white,
-.ansi-gray,
 span.agy-file-highlight,
-.process-card .agy-file-highlight,
-.process-card .ansi-file,
-.process-card .ansi-white,
-.process-card .ansi-gray {
+.process-card .agy-file-highlight {
     color: var(--color-file-item, #9ca3af) !important;
 }
 
@@ -661,13 +665,36 @@ button, input {
 /* Painel de Output Expandido */
 .process-card-body {
     display: none;
-    max-height: 280px;
+    max-height: 320px;
     overflow-y: auto;
+    overflow-x: auto;
     background: #0f172a;
     padding: 10px;
     font-size: var(--terminal-font-size, 13px);
     border-top: 1px solid rgba(75, 85, 99, 0.4);
     user-select: text;
+    -webkit-overflow-scrolling: touch;
+}
+
+.process-card-body pre {
+    white-space: pre !important;
+    word-break: normal !important;
+    overflow-x: auto;
+}
+
+.process-card-body::-webkit-scrollbar,
+.process-card-body pre::-webkit-scrollbar {
+    height: 5px;
+    width: 6px;
+}
+.process-card-body::-webkit-scrollbar-track,
+.process-card-body pre::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.6);
+}
+.process-card-body::-webkit-scrollbar-thumb,
+.process-card-body pre::-webkit-scrollbar-thumb {
+    background: rgba(75, 85, 99, 0.6);
+    border-radius: 4px;
 }
 
 .process-card.expanded .process-card-body {
