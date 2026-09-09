@@ -361,11 +361,21 @@ wss.on('connection', (ws) => {
 
         // Ação de listagem de diretório em árvore (rápida e assíncrona)
         if (parsed.action === 'list_dir') {
-            let rawPath = parsed.path || session.cwd;
-            if (rawPath.startsWith('~')) {
-                rawPath = rawPath.replace('~', process.env.HOME || '/root');
+            let rawPath = parsed.path || session.cwd || process.env.HOME || '/root';
+            const userHome = process.env.HOME || '/root';
+            if (rawPath === '~') {
+                rawPath = userHome;
+            } else if (rawPath.startsWith('~/')) {
+                rawPath = path.join(userHome, rawPath.substring(2));
             }
-            const targetPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(session.cwd, rawPath);
+
+            let targetPath;
+            if (path.isAbsolute(rawPath)) {
+                targetPath = path.normalize(rawPath);
+            } else {
+                targetPath = path.resolve(session.cwd || userHome, rawPath);
+            }
+
             fs.readdir(targetPath, { withFileTypes: true }, (err, entries) => {
                 if (err) {
                     ws.send(JSON.stringify({
@@ -502,9 +512,8 @@ wss.on('connection', (ws) => {
 
             session.lastCommand = cmd;
 
-            // Identifica se é comando com TUI interativo ou agy interativo
-            const isInteractiveTui = /^(agy(\s+.*)?|top|htop|nano|vi|vim|less|more|fzf|tmux)$/.test(cmd) &&
-                                     !cmd.includes(' -p ') && !cmd.includes(' --print ') && !cmd.includes(' --help ') && !cmd.includes(' -h ') && !cmd.includes(' --version ') && !cmd.includes(' -v ') && !cmd.includes(' models') && !cmd.includes(' agents');
+            // Identifica se é comando com tela cheia / TUI tradicional (top, nano, htop, vi, fzf, etc.)
+            const isInteractiveTui = /^(top|htop|nano|vi|vim|less|more|fzf|tmux)$/.test(cmd);
 
             const shortCwd = formatShortCwd(session.cwd);
             broadcastToTab(tabId, { type: 'system', data: `\n${shortCwd}$ ${cmd}\n` });
@@ -561,9 +570,21 @@ wss.on('connection', (ws) => {
                 session.isCurrentProcessPty = false;
                 broadcastTabsList();
 
+                let effectiveCmd = cmd;
+                // Se for comando 'agy' ou 'agy <prompt>', adapta para execução limpa em streaming não-bloqueante
+                if (effectiveCmd === 'agy') {
+                    effectiveCmd = `agy -p "Olá! Como posso te ajudar com o projeto?" -c --dangerously-skip-permissions`;
+                } else if (/^agy\s+(.+)$/.test(effectiveCmd)) {
+                    const agyArgs = effectiveCmd.replace(/^agy\s+/, '').trim();
+                    // Se não tiver flags de print ou help (-p, --print, -h, --help, models, etc.), passa como prompt
+                    if (!agyArgs.startsWith('-') && !/^(models|mcp|plugins|update|help|changelog|agents)/.test(agyArgs)) {
+                        effectiveCmd = `agy -p ${JSON.stringify(agyArgs)} -c --dangerously-skip-permissions`;
+                    }
+                }
+
                 // Injeta suporte para execução limpa de comandos preservando detecção de cwd e de ambiente (Termux vs Distro/PRoot)
                 const envDetectSnippet = `if [ -f /etc/os-release ]; then . /etc/os-release; _DISTRO_NAME="$NAME"; elif [ -n "$PREFIX" ] && echo "$PREFIX" | grep -q com.termux; then _DISTRO_NAME="Termux"; else _DISTRO_NAME="Linux"; fi; echo "__NEW_ENV__=\${_DISTRO_NAME:-Linux}"`;
-                const wrappedCmd = `${cmd}\n__EXIT_CODE__=$?\necho "__NEW_CWD__=$(pwd)"\n${envDetectSnippet}\nexit $__EXIT_CODE__`;
+                const wrappedCmd = `${effectiveCmd}\n__EXIT_CODE__=$?\necho "__NEW_CWD__=$(pwd)"\n${envDetectSnippet}\nexit $__EXIT_CODE__`;
 
                 session.currentProcess = spawn(wrappedCmd, {
                     shell: true,
@@ -637,7 +658,7 @@ wss.on('connection', (ws) => {
                         text = text.replace(/__NEW_ENV__=.*?(\r?\n|$)/g, '');
                     }
 
-                    if (text) {
+                    if (text && text.trim().length > 0) {
                         broadcastToTab(tabId, { type: 'output', data: text });
                     }
                 });
@@ -658,12 +679,7 @@ wss.on('connection', (ws) => {
                 if (wasPty) {
                     broadcastToTab(tabId, { type: 'pty_closed' });
                 }
-                if (code !== 0 && code !== null) {
-                    broadcastToTab(tabId, { type: 'system', data: `\n[Processo finalizado: código ${code}]\n` });
-                } else {
-                    broadcastToTab(tabId, { type: 'system', data: `\n[Processo concluído]\n` });
-                }
-                broadcastToTab(tabId, { type: 'status_idle' });
+                broadcastToTab(tabId, { type: 'status_idle', exitCode: code });
                 broadcastTabsList();
             };
 

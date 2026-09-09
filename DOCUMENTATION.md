@@ -60,6 +60,15 @@ O **Termux Web CLI** é uma aplicação PWA (Progressive Web App) desenhada para
 
 ## 4. Registro de Alterações (Changelog)
 
+### [2026-09-08] - Integração de Chat Interativo Nativo do Agente AGY (Sem Terminal / PTY)
+* **Agent Bridge (`agent_bridge.py`):**
+  * Ponte assíncrona em Python para orquestrar o Antigravity com execução contínua (`--continue`), auto-aprovação (`--dangerously-skip-permissions`) e streaming de chunks em tempo real.
+* **Backend WebSocket (`server.js`):**
+  * Manipulação de ações `agent_chat`, `agent_start`, `agent_chunk`, `agent_done` e `agent_error`.
+* **Frontend Mobile & Web (`public/index.html`, `public/app.js`):**
+  * Botão de acesso rápido **AGY Chat** na barra de ferramentas.
+  * Modal flutuante estilizado com layout de chat inteligente (bolhas de conversa, auto-scroll, renderização de blocos de código e markdown inline).
+
 ### [2026-09-05] - Suporte a Emulador Pseudo-Terminal (PTY) e Sessão Interativa (Xterm.js)
 * **Backend PTY Bridge (`pty_bridge.py` + `server.js`):**
   * Criação da ponte PTY nativa em Python para alocar canais `/dev/pts/*` com controle de dimensões de janela (`rows`, `cols`) e envio de sinal `SIGWINCH`.

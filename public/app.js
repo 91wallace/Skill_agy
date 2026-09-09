@@ -491,15 +491,8 @@ function openPtyView(commandName) {
         activeProcessCard.setInteractiveMode();
     }
 
-    if (ptyTerminalModal) {
-        ptyTerminalModal.classList.remove('hidden');
-        requestAnimationFrame(() => {
-            ptyTerminalModal.classList.remove('opacity-0');
-            if (ptyTerminalView) {
-                ptyTerminalView.classList.remove('scale-95');
-                ptyTerminalView.classList.add('scale-100');
-            }
-        });
+    if (ptyTerminalView) {
+        ptyTerminalView.classList.remove('hidden');
     }
     if (ptyViewTitle) {
         ptyViewTitle.textContent = `Sessão Interativa: ${commandName || currentInteractiveCmd || 'agy'}`;
@@ -522,37 +515,24 @@ function openPtyView(commandName) {
             } catch (e) {}
         };
 
-        // Redimensiona o container uma vez para casar com a viewport
+        // Redimensiona o container para casar com a viewport
         syncSize();
         if (xterm) xterm.focus();
+        scrollToBottom();
     }
 }
 
 function collapsePtyView() {
-    // Colapsa a janela flutuante para a view estilo Antigravity sem matar o processo
-    if (ptyTerminalModal) {
-        ptyTerminalModal.classList.add('opacity-0');
-        if (ptyTerminalView) {
-            ptyTerminalView.classList.remove('scale-100');
-            ptyTerminalView.classList.add('scale-95');
-        }
-        setTimeout(() => {
-            ptyTerminalModal.classList.add('hidden');
-        }, 200);
+    // Colapsa a visualização PTY mantendo o processo ativo no backend
+    if (ptyTerminalView) {
+        ptyTerminalView.classList.add('hidden');
     }
 }
 
 function closePtyView() {
     isPtySessionActive = false;
-    if (ptyTerminalModal) {
-        ptyTerminalModal.classList.add('opacity-0');
-        if (ptyTerminalView) {
-            ptyTerminalView.classList.remove('scale-100');
-            ptyTerminalView.classList.add('scale-95');
-        }
-        setTimeout(() => {
-            ptyTerminalModal.classList.add('hidden');
-        }, 200);
+    if (ptyTerminalView) {
+        ptyTerminalView.classList.add('hidden');
     }
 }
 
@@ -691,15 +671,14 @@ function connect() {
             }
 
             if (msgTabId === activeTabId) {
-                if (isFirstSync) {
-                    terminalOutput.innerHTML = '';
-                    if (Array.isArray(parsed.data)) {
-                        parsed.data.forEach(item => {
-                            appendLog(item.data, item.type, false, parsed.isRunning);
-                        });
-                    }
-                    isFirstSync = false;
+                terminalOutput.innerHTML = '';
+                if (Array.isArray(parsed.data)) {
+                    parsed.data.forEach(item => {
+                        appendLog(item.data, item.type, false, parsed.isRunning);
+                    });
                 }
+                isFirstSync = false;
+
                 if (parsed.isRunning) {
                     setProcessing(true);
                 } else {
@@ -791,7 +770,8 @@ function connect() {
                 setProcessing(false);
                 hideInteractiveOptionsPanel();
                 if (activeProcessCard) {
-                    activeProcessCard.finish('success');
+                    const finalStatus = (parsed.exitCode && parsed.exitCode !== 0) ? 'error' : 'success';
+                    activeProcessCard.finish(finalStatus);
                 }
             }
             return;
@@ -812,6 +792,32 @@ function connect() {
             }
         }
         
+        // Eventos do Chat do Assistente Inteligente AGY (Sem terminal)
+        if (parsed.type === 'agent_start') {
+            handleAgentStart(parsed.prompt);
+            return;
+        }
+
+        if (parsed.type === 'agent_auth_required') {
+            handleAgentAuthRequired(parsed.url);
+            return;
+        }
+
+        if (parsed.type === 'agent_chunk') {
+            handleAgentChunk(parsed.text);
+            return;
+        }
+
+        if (parsed.type === 'agent_done') {
+            handleAgentDone(parsed.exit_code);
+            return;
+        }
+
+        if (parsed.type === 'agent_error') {
+            handleAgentError(parsed.error);
+            return;
+        }
+
         // Remove estado "processando" quando detecta interrupção manual ou falha
         if (parsed.type === 'system' && (parsed.data.includes('Sinal SIGINT') || parsed.data.includes('Processo finalizado com erro'))) {
             targetTab.isRunning = false;
@@ -948,6 +954,34 @@ function highlightDirAndFilePaths(text) {
     return formatted;
 }
 
+// Helper para renderizar Markdown rico ou texto formatado com ANSI / Realce
+function renderRichMarkdownOrAnsi(rawText) {
+    if (!rawText) return '';
+    
+    // Remove sequências ANSI brutas
+    let cleanText = rawText.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
+    // Converte links file:///root/projects/mkd-note/... para caminhos limpos clicáveis ou formatados
+    cleanText = cleanText.replace(/\[([^\]]+)\]\(file:\/\/\/[^\)]+\)/g, '`$1`');
+
+    if (typeof marked !== 'undefined') {
+        try {
+            const rawHtml = marked.parse(cleanText, { gfm: true, breaks: true });
+            let sanitized = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+            // Realça caminhos de arquivos e pastas no texto gerado
+            sanitized = sanitized.replace(/\b([a-zA-Z0-9_\-\.\/]+\.(?:js|json|html|css|py|sh|ts|tsx|jsx|md|txt|yml|yaml|svg|png))\b/g, '<span class="agy-file-highlight font-medium">$1</span>');
+            return sanitized;
+        } catch (e) {
+            console.warn('Erro ao processar markdown:', e);
+        }
+    }
+
+    if (rawText.includes('\x1b[')) {
+        return parseAnsiToHtml(rawText);
+    }
+    return highlightDirAndFilePaths(rawText);
+}
+
 // Gerenciador de Process Cards (Estilo Antigravity 2 Linhas com Ticker e Contador)
 let activeProcessCard = null;
 
@@ -960,10 +994,10 @@ function createProcessCard(cmdText, isRunning = true) {
 
     // Linha 1: Ticker da última linha de output
     const line1 = document.createElement('div');
-    line1.className = 'process-card-line1';
+    line1.className = 'process-card-line1 hidden';
     line1.innerHTML = `
         <div class="process-ticker-wrapper">
-            <div class="process-ticker-text process-ticker-active">Iniciando execução...</div>
+            <div class="process-ticker-text process-ticker-active"></div>
         </div>
     `;
 
@@ -977,29 +1011,43 @@ function createProcessCard(cmdText, isRunning = true) {
             <span class="process-duration-badge">0s</span>
             <span class="process-cmd-badge" title="${escapeHtml(cmdText)}">${escapeHtml(cmdText)}</span>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
+        <div class="flex items-center gap-1.5 shrink-0">
             <div class="process-live-badge hidden" title="Servidor ativo em execução - toque para expandir/recolher log">
                 <span class="process-live-dot"></span>
                 <span>LIVE</span>
             </div>
-            <svg class="process-expand-chevron w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button type="button" class="process-stop-btn ${isRunning ? '' : 'hidden'}" title="Encerrar sessão / Interromper (Ctrl+C)">
+                <svg class="w-3 h-3 mr-1 fill-current" viewBox="0 0 24 24">
+                    <rect x="5" y="5" width="14" height="14" rx="2"></rect>
+                </svg>
+                <span>Parar</span>
+            </button>
+            <svg class="process-expand-chevron w-4 h-4 cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
             </svg>
         </div>
     `;
 
     header.appendChild(line1);
-    header.appendChild(line2);
 
-    // Painel expansível com todas as linhas de output
+    // Painel expansível com visualização rica em Markdown e suporte a logs formatados
     const body = document.createElement('div');
     body.className = 'process-card-body';
+    
+    // Contêiner de conteúdo rico (Markdown ou Pre)
+    const bodyContent = document.createElement('div');
+    bodyContent.className = 'markdown-content leading-relaxed font-sans text-gray-200';
+    
     const bodyPre = document.createElement('pre');
-    bodyPre.className = 'whitespace-pre overflow-x-auto leading-relaxed m-0 p-0 font-mono';
+    bodyPre.className = 'whitespace-pre-wrap break-words overflow-x-hidden leading-relaxed m-0 p-0 font-mono hidden';
+    
+    body.appendChild(bodyContent);
     body.appendChild(bodyPre);
 
+    header.appendChild(body);
+    header.appendChild(line2);
+
     card.appendChild(header);
-    card.appendChild(body);
 
     // Detecta se é comando interativo (PTY / TUI ou agy interativo)
     const isInteractiveCommand = /^(?:agy(?:\s+.*)?|top|htop|nano|vi|vim|less|more|fzf|tmux)$/i.test(cmdText.trim()) &&
@@ -1008,14 +1056,13 @@ function createProcessCard(cmdText, isRunning = true) {
     // Auto-descolapsa comandos de listagem / inspeção rápida (ex: ls, dir, tree, cat, git status, top)
     const isListingCommand = /^(?:ls|dir|tree|cat|head|tail|find|grep|git status|pwd|df|free)\b/i.test(cmdText.trim());
 
-    // Clique no card ou no badge LIVE: expande / recolhe o output completo ou reabre terminal interativo
+    // Clique no card ou no chevron: expande / recolhe o output completo
     header.addEventListener('click', () => {
-        if (isInteractiveCommand && isPtySessionActive) {
-            openPtyView(cmdText);
-            return;
-        }
-        if (!card.classList.contains('no-output') && bodyPre.textContent.trim().length > 0) {
+        if (!card.classList.contains('no-output') || bodyPre.textContent.trim().length > 0) {
+            card.classList.remove('no-output');
             card.classList.toggle('expanded');
+            const chevron = line2.querySelector('.process-expand-chevron');
+            if (chevron) chevron.style.display = '';
         }
     });
 
@@ -1023,10 +1070,21 @@ function createProcessCard(cmdText, isRunning = true) {
     if (liveBadge) {
         liveBadge.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (isInteractiveCommand && isPtySessionActive) {
-                openPtyView(cmdText);
-            } else if (bodyPre.textContent.trim().length > 0) {
+            if (!card.classList.contains('no-output') || bodyPre.textContent.trim().length > 0) {
+                card.classList.remove('no-output');
                 card.classList.toggle('expanded');
+                const chevron = line2.querySelector('.process-expand-chevron');
+                if (chevron) chevron.style.display = '';
+            }
+        });
+    }
+
+    const stopBtn = line2.querySelector('.process-stop-btn');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ tabId: activeTabId, action: 'kill' }));
             }
         });
     }
@@ -1056,6 +1114,7 @@ function createProcessCard(cmdText, isRunning = true) {
 
     const cardController = {
         element: card,
+        bodyContent: bodyContent,
         bodyPre: bodyPre,
         tickerText: line1.querySelector('.process-ticker-text'),
         tickerWrapper: line1.querySelector('.process-ticker-wrapper'),
@@ -1067,6 +1126,7 @@ function createProcessCard(cmdText, isRunning = true) {
         startTime: startTime,
         timerInterval: timerInterval,
         lastLineText: '',
+        rawOutputBuffer: '',
         
         // Modo interativo: exibe badge LIVE com bolinha verde pulsante e oculta timer/porcentagem
         setInteractiveMode() {
@@ -1143,21 +1203,34 @@ function createProcessCard(cmdText, isRunning = true) {
             }
 
             // 3. Reconhecimento inteligente de fluxos do Antigravity (AGY)
-            if (newLatestLine.includes('[Thinking]') || newLatestLine.toLowerCase().includes('thinking:')) {
+            if (/\[Thinking\]|thinking\:|ponderando|pensando/i.test(newLatestLine)) {
                 newLatestLine = '🧠 Pensando na solução...';
-            } else if (newLatestLine.includes('[Tool]') || newLatestLine.includes('tool_call:') || newLatestLine.includes('Executing:')) {
-                const toolMatch = newLatestLine.match(/\[Tool\]\s*(.*)/) || newLatestLine.match(/Executing:\s*(.*)/);
+            } else if (/\[Tool\]|tool_call\:|Executing\:/i.test(newLatestLine)) {
+                const toolMatch = newLatestLine.match(/(?:\[Tool\]|Executing\:)\s*(.*)/i);
                 newLatestLine = `🛠️ ${toolMatch ? toolMatch[1] : 'Executando ferramenta...'}`;
-            } else if (newLatestLine.includes('[Action]') || newLatestLine.includes('Action:')) {
-                newLatestLine = `⚡ ${newLatestLine.replace(/\[Action\]\s*/, '')}`;
-            } else if (newLatestLine.includes('[Artifact]') || newLatestLine.includes('artifact:')) {
+            } else if (/view_file|reading file|lendo arquivo/i.test(newLatestLine)) {
+                const fileMatch = newLatestLine.match(/([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/);
+                newLatestLine = `🔍 Lendo ${fileMatch ? fileMatch[1] : 'arquivo...'}`;
+            } else if (/replace_file_content|write_to_file|editando|modificando/i.test(newLatestLine)) {
+                const fileMatch = newLatestLine.match(/([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/);
+                newLatestLine = `✏️ Editando ${fileMatch ? fileMatch[1] : 'arquivo...'}`;
+            } else if (/run_command|executando comando/i.test(newLatestLine)) {
+                newLatestLine = `⚡ Executando comando no projeto...`;
+            } else if (/\[Action\]|Action\:/i.test(newLatestLine)) {
+                newLatestLine = `⚡ ${newLatestLine.replace(/\[Action\]\s*/i, '')}`;
+            } else if (/\[Artifact\]|artifact\:/i.test(newLatestLine)) {
                 newLatestLine = '📦 Gerando artefato / código...';
+            } else if (/authentication required|accounts\.google\.com/i.test(newLatestLine)) {
+                newLatestLine = '🔐 Autenticação Google solicitada';
             }
 
             if (newLatestLine === this.lastLineText) return;
             this.lastLineText = newLatestLine;
 
             if (this.tickerWrapper) {
+                if (line1.classList.contains('hidden')) {
+                    line1.classList.remove('hidden');
+                }
                 const oldTicker = this.tickerWrapper.querySelector('.process-ticker-active');
                 if (oldTicker) {
                     oldTicker.classList.remove('process-ticker-active');
@@ -1185,8 +1258,10 @@ function createProcessCard(cmdText, isRunning = true) {
             }
         },
 
-        // Adiciona texto ao log expandido
+        // Adiciona texto ao log expandido com renderização rica em Markdown
         appendOutput(text, type = 'output') {
+            this.rawOutputBuffer += text;
+
             const span = document.createElement('span');
             if (text.includes('\x1b[')) {
                 span.innerHTML = parseAnsiToHtml(text);
@@ -1195,10 +1270,22 @@ function createProcessCard(cmdText, isRunning = true) {
             }
             if (type === 'error') span.classList.add('text-red-400');
             this.bodyPre.appendChild(span);
+
+            // Apenas programas TUI fullscreen (nano, htop, vi, fzf) usam pre puro
+            const isPureTty = /^(top|htop|nano|vi|vim|less|more|fzf|tmux)$/i.test(cmdText.trim());
+            if (!isPureTty && this.bodyContent) {
+                this.bodyContent.innerHTML = renderRichMarkdownOrAnsi(this.rawOutputBuffer);
+                this.bodyContent.classList.remove('hidden');
+                this.bodyPre.classList.add('hidden');
+            } else if (this.bodyPre) {
+                this.bodyPre.classList.remove('hidden');
+                if (this.bodyContent) this.bodyContent.classList.add('hidden');
+            }
+
             this.updateTicker(text);
 
-            // Se for comando de listagem / inspeção (ex: ls), descolapsa automaticamente
-            if (isListingCommand && !card.classList.contains('expanded') && this.bodyPre.textContent.trim().length > 0) {
+            // Se for comando de listagem / inspeção ou comando agy com saída, descolapsa automaticamente
+            if ((isListingCommand || isInteractiveCommand) && !card.classList.contains('expanded') && this.rawOutputBuffer.trim().length > 0) {
                 card.classList.add('expanded');
             }
         },
@@ -1225,13 +1312,18 @@ function createProcessCard(cmdText, isRunning = true) {
                 this.percentBadge.classList.add('hidden');
             }
 
-            // Ao finalizar, oculta o badge LIVE
+            // Ao finalizar, oculta o badge LIVE e o botão Parar
             if (this.liveBadge) {
                 this.liveBadge.classList.add('hidden');
             }
+            const stopBtn = line2.querySelector('.process-stop-btn');
+            if (stopBtn) {
+                stopBtn.classList.add('hidden');
+            }
 
             // Se o comando terminou sem produzir output em stdout (ex: cd, export, mkdir)
-            if (!this.lastLineText || this.bodyPre.textContent.trim().length === 0) {
+            const hasOutput = (this.bodyContent && this.bodyContent.textContent.trim().length > 0) || (this.bodyPre && this.bodyPre.textContent.trim().length > 0);
+            if (!hasOutput) {
                 card.classList.add('no-output');
                 card.classList.remove('expanded');
                 const chevron = line2.querySelector('.process-expand-chevron');
@@ -1240,8 +1332,12 @@ function createProcessCard(cmdText, isRunning = true) {
                 }
                 if (status === 'error') {
                     this.updateTicker('Falha na execução');
-                } else {
-                    this.updateTicker('Concluído');
+                }
+            } else {
+                card.classList.remove('no-output');
+                const chevron = line2.querySelector('.process-expand-chevron');
+                if (chevron) {
+                    chevron.style.display = '';
                 }
             }
 
@@ -1298,7 +1394,11 @@ function appendLog(text, type, autoScroll = true, isRunning = true) {
         let previousOutputHtml = '';
         if (activeProcessCard) {
             activeProcessCard.finish('success');
-            previousOutputHtml = activeProcessCard.bodyPre.innerHTML.trim();
+            if (activeProcessCard.bodyContent && !activeProcessCard.bodyContent.classList.contains('hidden') && activeProcessCard.bodyContent.innerHTML.trim().length > 0) {
+                previousOutputHtml = activeProcessCard.bodyContent.innerHTML.trim();
+            } else {
+                previousOutputHtml = activeProcessCard.bodyPre.innerHTML.trim();
+            }
             if (activeProcessCard.element && activeProcessCard.element.parentNode) {
                 activeProcessCard.element.parentNode.removeChild(activeProcessCard.element);
             }
@@ -1353,9 +1453,6 @@ function appendLog(text, type, autoScroll = true, isRunning = true) {
 
         // Cria o novo Process Card estilo Antigravity exclusivo para o último comando ativo
         activeProcessCard = createProcessCard(extractedCmd, isRunning);
-        if (!isRunning) {
-            activeProcessCard.finish('success');
-        }
         terminalOutput.appendChild(activeProcessCard.element);
 
         if (autoScroll) {
@@ -2337,6 +2434,7 @@ function updateCwdDisplay(newCwd) {
 let activeToggleBtn = null;
 
 function toggleDirectoryTree(btnTrigger = null) {
+    if (!dirTreePanel) return;
     if (dirTreePanel.classList.contains('hidden')) {
         openDirectoryTree(btnTrigger);
     } else {
@@ -2345,6 +2443,8 @@ function toggleDirectoryTree(btnTrigger = null) {
 }
 
 function openDirectoryTree(btnTrigger = null) {
+    if (!dirTreePanel) return;
+
     // Remove classe open de outros botões
     document.querySelectorAll('.btn-inline-dir').forEach(b => b.classList.remove('open'));
     
@@ -2360,25 +2460,34 @@ function openDirectoryTree(btnTrigger = null) {
     }
 
     if (activeToggleBtn && terminalContainer) {
-        const btnRect = activeToggleBtn.getBoundingClientRect();
-        const containerRect = terminalContainer.getBoundingClientRect();
-        const topOffset = Math.max(8, btnRect.bottom - containerRect.top + terminalContainer.scrollTop + 4);
-        dirTreePanel.style.top = `${topOffset}px`;
+        const btnOffsetTop = activeToggleBtn.offsetTop;
+        const btnHeight = activeToggleBtn.offsetHeight || 24;
+        const calculatedTop = btnOffsetTop + btnHeight + 4;
+        dirTreePanel.style.top = `${Math.max(8, calculatedTop)}px`;
     } else {
         dirTreePanel.style.top = '48px';
     }
 
+    if (treeCurrentCwd) {
+        treeCurrentCwd.textContent = activeCwd || '~';
+    }
+
     dirTreePanel.classList.remove('hidden');
-    loadDirectoryContent(activeCwd, directoryTreeContent, 0);
+    loadDirectoryContent(activeCwd || '~', directoryTreeContent, 0);
 }
 
 function closeDirectoryTree() {
+    if (!dirTreePanel) return;
     dirTreePanel.classList.add('hidden');
     document.querySelectorAll('.btn-inline-dir').forEach(b => b.classList.remove('open'));
     activeToggleBtn = null;
 }
 
 function loadDirectoryContent(targetPath, containerElement, level = 0) {
+    if (!containerElement) return;
+
+    const safePath = targetPath || activeCwd || '~';
+
     containerElement.innerHTML = `
         <div class="flex items-center gap-1.5 py-1 text-gray-500 text-[11px] animate-pulse pl-${Math.min(level * 3, 12)}">
             <span class="inline-block w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
@@ -2413,7 +2522,7 @@ function loadDirectoryContent(targetPath, containerElement, level = 0) {
         }
 
         visibleItems.forEach(item => {
-            const itemPath = targetPath === '/' ? `/${item.name}` : `${targetPath}/${item.name}`;
+            const itemPath = (safePath === '/' || safePath === '') ? `/${item.name}` : `${safePath}/${item.name}`;
             const row = document.createElement('div');
             row.className = 'tree-node flex flex-col';
 
@@ -2490,7 +2599,7 @@ function loadDirectoryContent(targetPath, containerElement, level = 0) {
             tabId: activeTabId,
             action: 'list_dir',
             requestId: requestId,
-            path: targetPath,
+            path: safePath,
             showHidden: showHiddenFiles
         }));
     }
@@ -2884,6 +2993,11 @@ function showInteractiveOptionsPanel(data) {
  */
 function executeSelectedOption(option) {
     if (!option) return;
+    if (option.isUrl && option.value) {
+        window.open(option.value, '_blank');
+        hideInteractiveOptionsPanel();
+        return;
+    }
     const sendVal = option.value !== undefined ? option.value : (option.key !== undefined ? option.key : option.label);
     
     hideInteractiveOptionsPanel();
@@ -2911,7 +3025,23 @@ function detectInteractiveOptionsInStream(text) {
         streamBufferForQuestions = streamBufferForQuestions.slice(-2000);
     }
 
-    // 1. Detecção de JSON Estruturado de ask_question ou interactive_options
+    // 1. Detecção de Solicitação de Autenticação Google OAuth
+    if (streamBufferForQuestions.includes('accounts.google.com/o/oauth2/auth') || streamBufferForQuestions.includes('Authentication required')) {
+        const authMatch = streamBufferForQuestions.match(/(https:\/\/accounts\.google\.com\/o\/oauth2\/auth\S+)/);
+        if (authMatch && authMatch[1]) {
+            const authUrl = authMatch[1];
+            showInteractiveOptionsPanel({
+                title: 'Autenticação Google Solicitada (Antigravity):',
+                timeoutSeconds: 60,
+                options: [
+                    { key: '🔗', label: 'Abrir Link de Login do Google no Navegador', isDefault: true, value: authUrl, isUrl: true }
+                ]
+            });
+            return;
+        }
+    }
+
+    // 2. Detecção de JSON Estruturado de ask_question ou interactive_options
     if (streamBufferForQuestions.includes('__INTERACTIVE_OPTIONS__=')) {
         const match = streamBufferForQuestions.match(/__INTERACTIVE_OPTIONS__=(.*?)(?:\r?\n|$)/);
         if (match && match[1]) {
@@ -3015,7 +3145,3 @@ function detectInteractiveOptionsInStream(text) {
 
 // Inicializa a conexão ao carregar a página
 connect();
-
-
-
-
