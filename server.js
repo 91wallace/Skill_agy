@@ -9,18 +9,76 @@ const { Client } = require('ssh2');
 
 const app = express();
 app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-// Serve a pasta 'public' onde ficará o frontend (PWA)
+// Servir os arquivos estáticos da interface web
 app.use(express.static(path.join(__dirname, 'public')));
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Gerenciamento de Múltiplas Sessões / Abas de Terminal
+// Constantes e Estados
 const MAX_LOG_HISTORY = 1000;
 const sessions = new Map(); // tabId -> SessionObject
+const activeProcesses = new Map(); // tabId -> ChildProcess
 
-// Detecção do ambiente de execução do sistema hospedeiro (Termux, Proot, Distro Linux)
+// Utilitário para remoção de códigos de escape ANSI
+function stripAnsi(str) {
+    if (typeof str !== 'string') return '';
+    return str
+        .replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '')
+        .replace(/\x1B\][0-9];[^\x07\x1B]*(\x07|\x1B\\)/g, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
+}
+
+// Localiza o binário do Antigravity (agy)
+function getAgyBinaryPath() {
+    const candidates = [
+        '/root/.local/bin/agy',
+        '/root/.gemini/antigravity-cli/bin/agy',
+        '/data/data/com.termux/files/usr/bin/agy',
+        '/usr/local/bin/agy',
+        '/usr/bin/agy'
+    ];
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
+    return 'agy'; // fallback para PATH do sistema
+}
+
+// Monta PATH completo do ambiente
+function getFullEnvPath() {
+    return [
+        '/root/.gemini/antigravity-cli/bin',
+        '/root/.local/bin',
+        '/data/data/com.termux/files/usr/bin',
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin',
+        process.env.PATH || ''
+    ].filter(Boolean).join(':');
+}
+
+function getExecutionEnv() {
+    const userHome = process.env.HOME || '/root';
+    const userName = process.env.USER || 'root';
+    return Object.assign({}, process.env, {
+        HOME: userHome,
+        USER: userName,
+        PATH: getFullEnvPath(),
+        TERM: 'dumb',
+        NO_COLOR: '1',
+        FORCE_COLOR: '0',
+        DEBIAN_FRONTEND: 'noninteractive'
+    });
+}
+
+// Detecção de ambiente (Termux, Proot, Distro Linux)
 function getHostEnvironmentType() {
     let distroName = null;
     try {
@@ -41,7 +99,6 @@ function getHostEnvironmentType() {
         }
     } catch (e) {}
 
-    // Se encontramos uma distro via /etc/os-release (ex: Ubuntu em PRoot ou Ubuntu Linux nativo)
     if (distroName && !/termux/i.test(distroName)) {
         return { type: 'distro', label: distroName };
     }
@@ -58,33 +115,110 @@ function getHostEnvironmentType() {
     }
 }
 
-function createSession(tabId, title = null, initialCwd = null) {
+const SESSIONS_STATE_FILE = path.join(__dirname, '.sessions_state.json');
+let saveSessionsTimeout = null;
+
+function saveSessionsToDiskDebounced() {
+    if (saveSessionsTimeout) clearTimeout(saveSessionsTimeout);
+    saveSessionsTimeout = setTimeout(() => {
+        saveSessionsToDisk();
+    }, 500);
+}
+
+function saveSessionsToDisk() {
+    try {
+        const dataToSave = Array.from(sessions.values()).map(s => ({
+            id: s.id,
+            title: s.title,
+            cwd: s.cwd,
+            envType: s.envType,
+            envLabel: s.envLabel,
+            sessionId: s.sessionId || null,
+            isAgyMode: !!s.isAgyMode,
+            lastPrompt: s.lastPrompt || '',
+            lastCommand: s.lastCommand || '',
+            messages: s.messages ? s.messages.slice(-50) : [],
+            logHistory: s.logHistory ? s.logHistory.slice(-300) : []
+        }));
+        fs.writeFileSync(SESSIONS_STATE_FILE, JSON.stringify(dataToSave, null, 2), 'utf8');
+    } catch (e) {
+        console.error('[Session Persistence] Erro ao salvar sessões:', e.message);
+    }
+}
+
+function loadSessionsFromDisk() {
+    try {
+        if (fs.existsSync(SESSIONS_STATE_FILE)) {
+            const raw = fs.readFileSync(SESSIONS_STATE_FILE, 'utf8');
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                const currentEnv = getHostEnvironmentType();
+                parsed.forEach(item => {
+                    if (item && item.id) {
+                        let validatedCwd = item.cwd;
+                        if (!validatedCwd || !fs.existsSync(validatedCwd)) {
+                            validatedCwd = process.env.HOME || process.cwd();
+                        }
+                        const session = {
+                            id: item.id,
+                            title: item.title || (item.isAgyMode ? 'AGY Chat' : currentEnv.label),
+                            cwd: validatedCwd,
+                            envType: item.envType || currentEnv.type,
+                            envLabel: item.envLabel || currentEnv.label,
+                            sessionId: item.sessionId || null,
+                            isAgyMode: !!item.isAgyMode,
+                            messages: Array.isArray(item.messages) ? item.messages : [],
+                            logHistory: Array.isArray(item.logHistory) ? item.logHistory : [],
+                            lastPrompt: item.lastPrompt || '',
+                            lastCommand: item.lastCommand || '',
+                            isSsh: false,
+                            sshClient: null,
+                            sshStream: null,
+                            sshHost: null
+                        };
+                        sessions.set(item.id, session);
+                    }
+                });
+                console.log(`[Session Persistence] Restauradas ${sessions.size} sessão(ões) salvas.`);
+            }
+        }
+    } catch (e) {
+        console.error('[Session Persistence] Erro ao carregar sessões salvas:', e.message);
+    }
+}
+
+function createSession(tabId, title = null, initialCwd = null, isAgy = true) {
     const currentEnv = getHostEnvironmentType();
     const defaultCwd = initialCwd || process.env.HOME || process.cwd();
-    const defaultTitle = title || currentEnv.label;
+    const defaultTitle = title || (isAgy ? 'AGY Chat' : currentEnv.label);
     const session = {
         id: tabId,
         title: defaultTitle,
         cwd: defaultCwd,
-        envType: currentEnv.type, // 'termux' | 'distro' | 'ssh'
+        envType: currentEnv.type,
         envLabel: currentEnv.label,
-        currentProcess: null,
-        isCurrentProcessPty: false,
+        sessionId: null,
+        isAgyMode: isAgy,
+        messages: [],
+        logHistory: [],
+        lastPrompt: '',
+        lastCommand: '',
         isSsh: false,
         sshClient: null,
         sshStream: null,
-        sshHost: null,
-        logHistory: [],
-        lastCommand: ''
+        sshHost: null
     };
     sessions.set(tabId, session);
+    saveSessionsToDisk();
     return session;
 }
 
-// Inicializa a primeira sessão padrão
-createSession('tab-1');
+// Inicialização de sessões salvas
+loadSessionsFromDisk();
+if (sessions.size === 0) {
+    createSession('tab-1', 'AGY Chat', process.cwd(), true);
+}
 
-// Formata caminho encurtado exibindo os dois últimos diretórios sem barra inicial (ex: projects/Skill_agy)
 function formatShortCwd(fullPath) {
     if (!fullPath) return '';
     const normalized = path.normalize(fullPath).replace(/[\\/]+$/, '');
@@ -99,12 +233,12 @@ function formatShortCwd(fullPath) {
 function broadcastToTab(tabId, obj) {
     const session = sessions.get(tabId);
     if (session) {
-        // Salva no histórico da aba específica (exceto chunks de streaming PTY xterm)
-        if (obj.type !== 'pty_output') {
-            session.logHistory.push(obj);
+        if (obj && typeof obj.data === 'string' && obj.data.length > 0) {
+            session.logHistory.push({ type: obj.type, data: obj.data, timestamp: Date.now() });
             if (session.logHistory.length > MAX_LOG_HISTORY) {
                 session.logHistory.shift();
             }
+            saveSessionsToDiskDebounced();
         }
     }
 
@@ -125,11 +259,13 @@ function broadcastTabsList() {
         cwd: s.cwd,
         envType: s.isSsh ? 'ssh' : (s.envType || defaultEnv.type),
         envLabel: s.isSsh ? 'SSH' : (s.envLabel || defaultEnv.label),
-        isRunning: (s.currentProcess !== null) || (s.isSsh && s.sshClient !== null),
-        isPty: s.isCurrentProcessPty || s.isSsh,
+        isRunning: activeProcesses.has(s.id) || (s.isSsh && s.sshClient !== null),
         isSsh: !!s.isSsh,
         sshHost: s.sshHost || null,
-        lastCommand: s.lastCommand
+        sessionId: s.sessionId || null,
+        isAgyMode: !!s.isAgyMode,
+        lastCommand: s.lastCommand,
+        lastPrompt: s.lastPrompt
     }));
     const json = JSON.stringify({ type: 'tabs_list', tabs: list });
     wss.clients.forEach((client) => {
@@ -139,13 +275,513 @@ function broadcastTabsList() {
     });
 }
 
+// Execução Headless de Prompt Antigravity
+function runHeadlessAgyPrompt({ prompt, sessionId, tabId, cwd, continueSession, model, effort, onChunk, onFinish }) {
+    const agyBin = getAgyBinaryPath();
+    const targetTabId = tabId || 'tab-1';
+    let session = sessions.get(targetTabId);
+    if (!session) {
+        session = createSession(targetTabId, 'AGY Chat', cwd || process.cwd(), true);
+    }
+
+    const workingDir = cwd || session.cwd || process.cwd();
+    session.cwd = workingDir;
+    session.lastPrompt = prompt;
+
+    const args = [];
+
+    // Contexto e Continuidade de Conversa
+    if (sessionId) {
+        args.push('--conversation', sessionId);
+    } else if (session.sessionId) {
+        args.push('--conversation', session.sessionId);
+    } else if (continueSession || session.isAgyMode) {
+        args.push('-c');
+    }
+
+    if (model) {
+        args.push('--model', model);
+    }
+    if (effort) {
+        args.push('--effort', effort);
+    }
+
+    args.push('-p', prompt);
+    args.push('--dangerously-skip-permissions');
+
+    const env = getExecutionEnv();
+    const startTime = Date.now();
+
+    broadcastToTab(targetTabId, {
+        type: 'prompt_start',
+        prompt: prompt,
+        sessionId: session.sessionId || null,
+        timestamp: startTime
+    });
+    broadcastTabsList();
+
+    const proc = spawn(agyBin, args, {
+        cwd: workingDir,
+        env: env,
+        detached: false
+    });
+
+    activeProcesses.set(targetTabId, proc);
+
+    let stdoutAcc = '';
+    let stderrAcc = '';
+
+    proc.stdout.on('data', (chunk) => {
+        const text = stripAnsi(chunk.toString());
+        stdoutAcc += text;
+        if (onChunk) onChunk({ type: 'stdout', text, raw: chunk.toString() });
+        broadcastToTab(targetTabId, { type: 'prompt_chunk', data: text });
+    });
+
+    proc.stderr.on('data', (chunk) => {
+        const text = stripAnsi(chunk.toString());
+        stderrAcc += text;
+        if (onChunk) onChunk({ type: 'stderr', text, raw: chunk.toString() });
+        broadcastToTab(targetTabId, { type: 'prompt_stderr_chunk', data: text });
+    });
+
+    proc.on('error', (err) => {
+        activeProcesses.delete(targetTabId);
+        const errorMsg = `\n[Erro ao executar Antigravity: ${err.message}]\n`;
+        stderrAcc += errorMsg;
+        broadcastToTab(targetTabId, { type: 'error', data: errorMsg });
+        broadcastToTab(targetTabId, { type: 'status_idle', exitCode: 1 });
+        broadcastTabsList();
+        if (onFinish) {
+            onFinish({
+                success: false,
+                stdout: stripAnsi(stdoutAcc).trim(),
+                stderr: stripAnsi(stderrAcc).trim(),
+                exitCode: 1,
+                durationMs: Date.now() - startTime,
+                tabId: targetTabId,
+                sessionId: session.sessionId
+            });
+        }
+    });
+
+    proc.on('close', (code) => {
+        activeProcesses.delete(targetTabId);
+        const durationMs = Date.now() - startTime;
+        const cleanStdout = stripAnsi(stdoutAcc).trim();
+        const cleanStderr = stripAnsi(stderrAcc).trim();
+
+        // Registra mensagem no histórico da sessão
+        session.messages.push({
+            role: 'user',
+            content: prompt,
+            timestamp: startTime
+        });
+        session.messages.push({
+            role: 'assistant',
+            content: cleanStdout || cleanStderr,
+            timestamp: Date.now(),
+            exitCode: code
+        });
+        saveSessionsToDiskDebounced();
+
+        broadcastToTab(targetTabId, {
+            type: 'prompt_complete',
+            data: cleanStdout,
+            stderr: cleanStderr,
+            exitCode: code,
+            durationMs: durationMs
+        });
+        broadcastToTab(targetTabId, { type: 'status_idle', exitCode: code });
+        broadcastTabsList();
+
+        if (onFinish) {
+            onFinish({
+                success: code === 0,
+                stdout: cleanStdout,
+                stderr: cleanStderr,
+                exitCode: code,
+                durationMs: durationMs,
+                tabId: targetTabId,
+                sessionId: session.sessionId
+            });
+        }
+    });
+
+    return proc;
+}
+
+// Execução Headless de Comandos Shell
+function runHeadlessCommand({ command, tabId, cwd, onChunk, onFinish }) {
+    const targetTabId = tabId || 'tab-1';
+    let session = sessions.get(targetTabId);
+    if (!session) {
+        session = createSession(targetTabId, 'Terminal', cwd || process.cwd(), false);
+    }
+
+    const workingDir = cwd || session.cwd || process.cwd();
+    session.lastCommand = command;
+
+    const shortCwd = formatShortCwd(workingDir);
+    broadcastToTab(targetTabId, { type: 'command_start', command, cwd: workingDir, shortCwd });
+
+    // Injeta captura de novo CWD e novo ambiente
+    const envDetectSnippet = `if [ -f /etc/os-release ]; then . /etc/os-release; _DISTRO_NAME="$NAME"; elif [ -n "$PREFIX" ] && echo "$PREFIX" | grep -q com.termux; then _DISTRO_NAME="Termux"; else _DISTRO_NAME="Linux"; fi; echo "__NEW_ENV__=\${_DISTRO_NAME:-Linux}"`;
+    const wrappedCmd = `${command}\n__EXIT_CODE__=$?\necho "__NEW_CWD__=$(pwd)"\n${envDetectSnippet}\nexit $__EXIT_CODE__`;
+
+    const env = getExecutionEnv();
+    const startTime = Date.now();
+
+    const proc = spawn(wrappedCmd, {
+        shell: true,
+        cwd: workingDir,
+        env: env,
+        detached: false
+    });
+
+    activeProcesses.set(targetTabId, proc);
+    broadcastTabsList();
+
+    let stdoutAcc = '';
+    let stderrAcc = '';
+
+    proc.stdout.on('data', (chunk) => {
+        let text = chunk.toString();
+
+        if (text.includes('__NEW_CWD__=')) {
+            const match = text.match(/__NEW_CWD__=(.*?)(\r?\n|$)/);
+            if (match && match[1]) {
+                session.cwd = match[1].trim();
+                broadcastToTab(targetTabId, { type: 'cwd_updated', cwd: session.cwd });
+                broadcastTabsList();
+                saveSessionsToDisk();
+            }
+            text = text.replace(/__NEW_CWD__=.*?(\r?\n|$)/g, '');
+        }
+
+        if (text.includes('__NEW_ENV__=')) {
+            const envMatch = text.match(/__NEW_ENV__=(.*?)(\r?\n|$)/);
+            if (envMatch && envMatch[1]) {
+                const rawEnv = envMatch[1].trim();
+                let detectedType = 'distro';
+                let detectedLabel = rawEnv;
+                if (/termux/i.test(rawEnv)) {
+                    detectedType = 'termux';
+                    detectedLabel = 'Termux';
+                }
+                session.envType = detectedType;
+                session.envLabel = detectedLabel;
+                broadcastTabsList();
+                saveSessionsToDisk();
+            }
+            text = text.replace(/__NEW_ENV__=.*?(\r?\n|$)/g, '');
+        }
+
+        const cleanText = stripAnsi(text);
+        if (cleanText) {
+            stdoutAcc += cleanText;
+            if (onChunk) onChunk({ type: 'stdout', text: cleanText });
+            broadcastToTab(targetTabId, { type: 'output', data: cleanText });
+        }
+    });
+
+    proc.stderr.on('data', (chunk) => {
+        const cleanText = stripAnsi(chunk.toString());
+        stderrAcc += cleanText;
+        if (onChunk) onChunk({ type: 'stderr', text: cleanText });
+        broadcastToTab(targetTabId, { type: 'error', data: cleanText });
+    });
+
+    proc.on('error', (err) => {
+        activeProcesses.delete(targetTabId);
+        const errorMsg = `\n[Falha de execução: ${err.message}]\n`;
+        stderrAcc += errorMsg;
+        broadcastToTab(targetTabId, { type: 'error', data: errorMsg });
+        broadcastToTab(targetTabId, { type: 'status_idle', exitCode: 1 });
+        broadcastTabsList();
+        if (onFinish) {
+            onFinish({
+                success: false,
+                stdout: stdoutAcc,
+                stderr: stderrAcc,
+                exitCode: 1,
+                cwd: session.cwd,
+                tabId: targetTabId
+            });
+        }
+    });
+
+    proc.on('close', (code) => {
+        activeProcesses.delete(targetTabId);
+        const durationMs = Date.now() - startTime;
+        broadcastToTab(targetTabId, { type: 'status_idle', exitCode: code, durationMs });
+        broadcastTabsList();
+        if (onFinish) {
+            onFinish({
+                success: code === 0,
+                stdout: stdoutAcc.trim(),
+                stderr: stderrAcc.trim(),
+                exitCode: code,
+                cwd: session.cwd,
+                durationMs,
+                tabId: targetTabId
+            });
+        }
+    });
+
+    return proc;
+}
+
+// ==========================================
+// ENDPOINTS HTTP REST
+// ==========================================
+
+// 1. Endpoint HTTP Headless Antigravity (Requisito Principal do Refactor)
+app.post('/api/prompt', (req, res) => {
+    const { prompt, sessionId, tabId, cwd, continueSession, model, effort } = req.body;
+
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+        return res.status(400).json({ success: false, error: 'O campo prompt é obrigatório.' });
+    }
+
+    const targetTabId = tabId || 'tab-1';
+
+    // Se já estiver rodando um processo nessa aba, cancela ou retorna erro
+    if (activeProcesses.has(targetTabId)) {
+        return res.status(409).json({
+            success: false,
+            error: 'Já existe uma execução ativa para esta sessão. Cancele-a antes de iniciar outra.'
+        });
+    }
+
+    runHeadlessAgyPrompt({
+        prompt: prompt.trim(),
+        sessionId,
+        tabId: targetTabId,
+        cwd,
+        continueSession: continueSession !== false,
+        model,
+        effort,
+        onFinish: (result) => {
+            res.json(result);
+        }
+    });
+});
+
+// 2. Endpoint HTTP para Streaming de Prompt (Server-Sent Events)
+app.get('/api/prompt/stream', (req, res) => {
+    const prompt = req.query.prompt;
+    const tabId = req.query.tabId || 'tab-1';
+    const sessionId = req.query.sessionId;
+    const cwd = req.query.cwd;
+    const model = req.query.model;
+
+    if (!prompt) {
+        return res.status(400).json({ error: 'Prompt ausente.' });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    runHeadlessAgyPrompt({
+        prompt,
+        sessionId,
+        tabId,
+        cwd,
+        continueSession: true,
+        model,
+        onChunk: (chunk) => {
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        },
+        onFinish: (result) => {
+            res.write(`data: ${JSON.stringify({ type: 'done', result })}\n\n`);
+            res.end();
+        }
+    });
+});
+
+// 3. Endpoint HTTP para Execução de Comandos Shell
+app.post('/api/command', (req, res) => {
+    const { command, tabId, cwd } = req.body;
+
+    if (!command || typeof command !== 'string' || !command.trim()) {
+        return res.status(400).json({ success: false, error: 'Comando ausente.' });
+    }
+
+    const targetTabId = tabId || 'tab-1';
+
+    if (activeProcesses.has(targetTabId)) {
+        return res.status(409).json({
+            success: false,
+            error: 'Um processo já está em execução nesta aba.'
+        });
+    }
+
+    runHeadlessCommand({
+        command: command.trim(),
+        tabId: targetTabId,
+        cwd,
+        onFinish: (result) => {
+            res.json(result);
+        }
+    });
+});
+
+// 4. Endpoints de Gerenciamento de Sessões
+app.get('/api/sessions', (req, res) => {
+    const list = Array.from(sessions.values()).map(s => ({
+        id: s.id,
+        title: s.title,
+        cwd: s.cwd,
+        envType: s.envType,
+        envLabel: s.envLabel,
+        sessionId: s.sessionId,
+        isAgyMode: s.isAgyMode,
+        isRunning: activeProcesses.has(s.id),
+        messageCount: s.messages.length
+    }));
+    res.json({ success: true, sessions: list });
+});
+
+app.post('/api/sessions', (req, res) => {
+    const { id, title, cwd, isAgyMode } = req.body;
+    const tabId = id || ('tab-' + Date.now().toString(36));
+    const session = createSession(tabId, title, cwd, isAgyMode !== false);
+    broadcastTabsList();
+    res.json({ success: true, session });
+});
+
+app.get('/api/sessions/:id/messages', (req, res) => {
+    const session = sessions.get(req.params.id);
+    if (!session) {
+        return res.status(404).json({ success: false, error: 'Sessão não encontrada.' });
+    }
+    res.json({ success: true, messages: session.messages, cwd: session.cwd, title: session.title });
+});
+
+app.delete('/api/sessions/:id', (req, res) => {
+    const tabId = req.params.id;
+    if (activeProcesses.has(tabId)) {
+        const proc = activeProcesses.get(tabId);
+        try { proc.kill('SIGKILL'); } catch (e) {}
+        activeProcesses.delete(tabId);
+    }
+    sessions.delete(tabId);
+    if (sessions.size === 0) {
+        createSession('tab-1');
+    }
+    saveSessionsToDisk();
+    broadcastTabsList();
+    res.json({ success: true });
+});
+
+// 5. Cancelamento / Interrupção de Processo Ativo
+app.post('/api/cancel', (req, res) => {
+    const { tabId } = req.body;
+    const targetTabId = tabId || 'tab-1';
+
+    if (activeProcesses.has(targetTabId)) {
+        const proc = activeProcesses.get(targetTabId);
+        try {
+            if (proc.pid) process.kill(-proc.pid, 'SIGINT');
+        } catch (e) {
+            try { proc.kill('SIGKILL'); } catch (e2) {}
+        }
+        activeProcesses.delete(targetTabId);
+        broadcastToTab(targetTabId, { type: 'system', data: '\n[Processo interrompido pelo usuário]\n' });
+        broadcastToTab(targetTabId, { type: 'status_idle', exitCode: 130 });
+        broadcastTabsList();
+        return res.json({ success: true, message: 'Processo cancelado.' });
+    }
+    res.json({ success: true, message: 'Nenhum processo ativo.' });
+});
+
+// 6. Endpoint do Explorador de Diretórios / Arquivos
+app.get('/api/fs/list', (req, res) => {
+    const rawPath = req.query.path || process.env.HOME || '/root';
+    const userHome = process.env.HOME || '/root';
+    let targetPath = rawPath;
+
+    if (rawPath === '~') {
+        targetPath = userHome;
+    } else if (rawPath.startsWith('~/')) {
+        targetPath = path.join(userHome, rawPath.substring(2));
+    }
+
+    if (!path.isAbsolute(targetPath)) {
+        targetPath = path.resolve(userHome, targetPath);
+    }
+
+    fs.readdir(targetPath, { withFileTypes: true }, (err, entries) => {
+        if (err) {
+            return res.status(500).json({ success: false, error: err.message, path: targetPath, items: [] });
+        }
+
+        const showHidden = req.query.showHidden === 'true';
+        const filtered = showHidden ? entries : entries.filter(e => !e.name.startsWith('.'));
+
+        const items = filtered.map(entry => {
+            const itemPath = path.join(targetPath, entry.name);
+            let isDir = entry.isDirectory();
+            let size = 0;
+            let mtime = null;
+            try {
+                const stats = fs.statSync(itemPath);
+                size = stats.size;
+                mtime = stats.mtime;
+                isDir = stats.isDirectory();
+            } catch (e) {}
+
+            return {
+                name: entry.name,
+                fullPath: itemPath,
+                isDirectory: isDir,
+                isSymbolicLink: entry.isSymbolicLink(),
+                size: size,
+                mtime: mtime
+            };
+        }).sort((a, b) => {
+            if (a.isDirectory && !b.isDirectory) return -1;
+            if (!a.isDirectory && b.isDirectory) return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        res.json({
+            success: true,
+            path: targetPath,
+            parent: targetPath === '/' ? null : path.dirname(targetPath),
+            items: items
+        });
+    });
+});
+
+// 7. Termux Bridge / Disparo Remoto
+app.post('/api/bridge/open', (req, res) => {
+    const { targetPath } = req.body;
+    const scriptPath = path.join(__dirname, 'scripts', 'open_in_termux.py');
+    const p = spawn('python3', [scriptPath, targetPath || process.cwd()], {
+        cwd: process.cwd(),
+        env: process.env
+    });
+
+    let out = '';
+    p.stdout.on('data', d => { out += d.toString(); });
+    p.stderr.on('data', d => { out += d.toString(); });
+
+    p.on('close', code => {
+        res.json({ success: code === 0, code, output: out });
+    });
+});
+
+// ==========================================
+// WEBSOCKET HANDLERS (COMPATIBILIDADE E TEMPO REAL)
+// ==========================================
 wss.on('connection', (ws) => {
-    // Ao conectar/reconectar, envia lista de abas disponíveis
     broadcastTabsList();
 
     const defaultEnv = getHostEnvironmentType();
 
-    // Envia o estado de todas as abas
     sessions.forEach((session) => {
         ws.send(JSON.stringify({
             type: 'history',
@@ -154,11 +790,12 @@ wss.on('connection', (ws) => {
             envType: session.isSsh ? 'ssh' : (session.envType || defaultEnv.type),
             envLabel: session.isSsh ? 'SSH' : (session.envLabel || defaultEnv.label),
             data: session.logHistory,
+            messages: session.messages,
             cwd: session.cwd,
-            isRunning: (session.currentProcess !== null) || (session.isSsh && session.sshClient !== null),
-            isPty: session.isCurrentProcessPty || session.isSsh,
+            isRunning: activeProcesses.has(session.id) || (session.isSsh && session.sshClient !== null),
             isSsh: !!session.isSsh,
-            sshHost: session.sshHost || null
+            sshHost: session.sshHost || null,
+            isAgyMode: !!session.isAgyMode
         }));
     });
 
@@ -167,18 +804,39 @@ wss.on('connection', (ws) => {
         try {
             parsed = JSON.parse(message);
         } catch (e) {
-            ws.send(JSON.stringify({ type: 'error', data: '\n[Erro: Formato JSON inválido]\n' }));
+            ws.send(JSON.stringify({ type: 'error', data: '\n[Erro: JSON inválido]\n' }));
             return;
         }
 
         const tabId = parsed.tabId || 'tab-1';
         let session = sessions.get(tabId);
 
-        // Ação: Criar nova aba
+        if (parsed.action === 'sync_tab') {
+            if (session) {
+                const defaultEnv = getHostEnvironmentType();
+                ws.send(JSON.stringify({
+                    type: 'history',
+                    tabId: session.id,
+                    title: session.title,
+                    envType: session.isSsh ? 'ssh' : (session.envType || defaultEnv.type),
+                    envLabel: session.isSsh ? 'SSH' : (session.envLabel || defaultEnv.label),
+                    data: session.logHistory,
+                    messages: session.messages,
+                    cwd: session.cwd,
+                    isRunning: activeProcesses.has(session.id) || (session.isSsh && session.sshClient !== null),
+                    isSsh: !!session.isSsh,
+                    sshHost: session.sshHost || null,
+                    isAgyMode: !!session.isAgyMode
+                }));
+            }
+            return;
+        }
+
         if (parsed.action === 'create_tab') {
             const newTabId = parsed.newTabId || ('tab-' + Date.now().toString(36));
             const initialCwd = parsed.cwd || (session ? session.cwd : null);
-            const newSession = createSession(newTabId, parsed.title || null, initialCwd);
+            const isAgy = parsed.isAgyMode !== false;
+            const newSession = createSession(newTabId, parsed.title || null, initialCwd, isAgy);
             broadcastTabsList();
             ws.send(JSON.stringify({
                 type: 'tab_created',
@@ -187,47 +845,33 @@ wss.on('connection', (ws) => {
                 envType: newSession.envType,
                 envLabel: newSession.envLabel,
                 cwd: newSession.cwd,
+                isAgyMode: newSession.isAgyMode,
                 isRunning: false,
-                isPty: false,
                 isSsh: false
             }));
             return;
         }
 
-        // Ação: Fechar aba
         if (parsed.action === 'close_tab') {
             const targetTabId = parsed.targetTabId || tabId;
             const targetSession = sessions.get(targetTabId);
             if (targetSession) {
-                // Se for sessão SSH ativa, encerra conexão
+                if (activeProcesses.has(targetTabId)) {
+                    const p = activeProcesses.get(targetTabId);
+                    try { p.kill('SIGKILL'); } catch (e) {}
+                    activeProcesses.delete(targetTabId);
+                }
                 if (targetSession.isSsh && targetSession.sshClient) {
                     try {
                         if (targetSession.sshStream) targetSession.sshStream.end();
                         targetSession.sshClient.end();
                     } catch (e) {}
-                    targetSession.sshClient = null;
-                    targetSession.sshStream = null;
-                }
-                // Se o processo local estiver rodando na aba, encerra-o
-                if (targetSession.currentProcess) {
-                    try {
-                        if (targetSession.isCurrentProcessPty && targetSession.currentProcess.stdin && !targetSession.currentProcess.stdin.destroyed) {
-                            targetSession.currentProcess.stdin.write(JSON.stringify({ __ctrl__: 'kill' }) + '\n');
-                        }
-                        if (targetSession.currentProcess.pid) {
-                            process.kill(-targetSession.currentProcess.pid, 'SIGKILL');
-                        }
-                    } catch (e) {
-                        try {
-                            targetSession.currentProcess.kill('SIGKILL');
-                        } catch (e2) {}
-                    }
                 }
                 sessions.delete(targetTabId);
-                // Garante que sempre exista ao menos 1 aba ativa
                 if (sessions.size === 0) {
                     createSession('tab-1');
                 }
+                saveSessionsToDisk();
                 broadcastTabsList();
                 const json = JSON.stringify({ type: 'tab_closed', tabId: targetTabId });
                 wss.clients.forEach(c => {
@@ -237,471 +881,106 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        // Se a sessão não existir para as demais ações, cria dinamicamente
         if (!session) {
             session = createSession(tabId);
             broadcastTabsList();
         }
 
-        // Ação: Conectar via SSH Nativo
-        if (parsed.action === 'ssh_connect') {
-            const host = parsed.host;
-            const port = parseInt(parsed.port, 10) || 22;
-            const username = parsed.username || 'root';
-            const password = parsed.password;
-            const privateKey = parsed.privateKey;
-            const termCols = parsed.cols || 80;
-            const termRows = parsed.rows || 24;
-
-            if (!host) {
-                ws.send(JSON.stringify({ tabId, type: 'error', data: '\n[Erro SSH: Host ou IP não especificado]\n' }));
-                return;
-            }
-
-            // Encerra processo ou conexão SSH anterior na mesma aba se houver
-            if (session.sshClient) {
-                try {
-                    if (session.sshStream) session.sshStream.end();
-                    session.sshClient.end();
-                } catch (e) {}
-                session.sshClient = null;
-                session.sshStream = null;
-            }
-
-            session.isSsh = true;
-            session.envType = 'ssh';
-            session.envLabel = 'SSH';
-            session.sshHost = `${username}@${host}:${port}`;
-            session.title = `SSH: ${username}@${host}`;
-            session.isCurrentProcessPty = true;
-
-            broadcastToTab(tabId, { type: 'system', data: `\n[Iniciando conexão SSH com ${username}@${host}:${port}...]\n` });
-            broadcastToTab(tabId, { type: 'pty_opened', command: `ssh ${username}@${host}` });
-            broadcastTabsList();
-
-            const conn = new Client();
-            session.sshClient = conn;
-
-            conn.on('ready', () => {
-                broadcastToTab(tabId, { type: 'system', data: `\n[Autenticado com sucesso em ${host}! Abrindo terminal PTY...]\n\r` });
-                conn.shell({ term: 'xterm-256color', cols: termCols, rows: termRows }, (err, stream) => {
-                    if (err) {
-                        broadcastToTab(tabId, { type: 'error', data: `\n[Erro ao criar shell SSH: ${err.message}]\n` });
-                        conn.end();
-                        return;
-                    }
-
-                    session.sshStream = stream;
-
-                    stream.on('data', (data) => {
-                        broadcastToTab(tabId, { type: 'pty_output', data: data.toString('utf-8') });
-                    });
-
-                    stream.stderr.on('data', (data) => {
-                        broadcastToTab(tabId, { type: 'pty_output', data: data.toString('utf-8') });
-                    });
-
-                    stream.on('close', () => {
-                        broadcastToTab(tabId, { type: 'system', data: `\n\r[Sessão SSH encerrada pelo servidor remoto]\n\r` });
-                        broadcastToTab(tabId, { type: 'pty_closed' });
-                        broadcastToTab(tabId, { type: 'status_idle' });
-                        session.isSsh = false;
-                        session.sshStream = null;
-                        session.sshClient = null;
-                        session.isCurrentProcessPty = false;
-                        broadcastTabsList();
-                    });
-                });
-            });
-
-            conn.on('error', (err) => {
-                broadcastToTab(tabId, { type: 'error', data: `\n[Erro de Conexão SSH: ${err.message}]\n` });
-                broadcastToTab(tabId, { type: 'pty_closed' });
-                broadcastToTab(tabId, { type: 'status_idle' });
-                session.isSsh = false;
-                session.sshStream = null;
-                session.sshClient = null;
-                session.isCurrentProcessPty = false;
-                broadcastTabsList();
-            });
-
-            conn.on('end', () => {
-                session.isSsh = false;
-                session.sshStream = null;
-                session.sshClient = null;
-                session.isCurrentProcessPty = false;
-                broadcastTabsList();
-            });
-
-            const sshConfig = {
-                host: host,
-                port: port,
-                username: username,
-                readyTimeout: 20000,
-                keepaliveInterval: 10000
-            };
-
-            if (privateKey && privateKey.trim()) {
-                sshConfig.privateKey = privateKey.trim();
-                if (password) sshConfig.passphrase = password;
-            } else if (password !== undefined) {
-                sshConfig.password = password;
-            }
-
-            try {
-                conn.connect(sshConfig);
-            } catch (err) {
-                broadcastToTab(tabId, { type: 'error', data: `\n[Falha ao inicializar SSH: ${err.message}]\n` });
-                session.isSsh = false;
-                session.sshClient = null;
-                broadcastTabsList();
-            }
-            return;
-        }
-
-        // Ação de listagem de diretório em árvore (rápida e assíncrona)
-        if (parsed.action === 'list_dir') {
-            let rawPath = parsed.path || session.cwd || process.env.HOME || '/root';
-            const userHome = process.env.HOME || '/root';
-            if (rawPath === '~') {
-                rawPath = userHome;
-            } else if (rawPath.startsWith('~/')) {
-                rawPath = path.join(userHome, rawPath.substring(2));
-            }
-
-            let targetPath;
-            if (path.isAbsolute(rawPath)) {
-                targetPath = path.normalize(rawPath);
-            } else {
-                targetPath = path.resolve(session.cwd || userHome, rawPath);
-            }
-
-            fs.readdir(targetPath, { withFileTypes: true }, (err, entries) => {
-                if (err) {
-                    ws.send(JSON.stringify({
-                        type: 'dir_list_result',
-                        tabId: tabId,
-                        requestId: parsed.requestId,
-                        path: targetPath,
-                        error: err.message,
-                        items: []
-                    }));
-                    return;
-                }
-
-                const showHidden = parsed.showHidden === true;
-                const filteredEntries = showHidden ? entries : entries.filter(e => !e.name.startsWith('.'));
-
-                const items = filteredEntries.map(entry => ({
-                    name: entry.name,
-                    isDirectory: entry.isDirectory(),
-                    isSymbolicLink: entry.isSymbolicLink()
-                })).sort((a, b) => {
-                    if (a.isDirectory && !b.isDirectory) return -1;
-                    if (!a.isDirectory && b.isDirectory) return 1;
-                    return a.name.localeCompare(b.name);
-                });
-
-                ws.send(JSON.stringify({
-                    type: 'dir_list_result',
-                    tabId: tabId,
-                    requestId: parsed.requestId,
-                    path: targetPath,
-                    items: items
-                }));
-            });
-            return;
-        }
-
-        // Ação de redimensionamento do terminal PTY
-        if (parsed.action === 'pty_resize') {
-            const cols = parsed.cols || 80;
-            const rows = parsed.rows || 24;
-            if (session.isSsh && session.sshStream) {
-                try {
-                    session.sshStream.setWindow(rows, cols, 0, 0);
-                } catch (e) {}
-            } else if (session.currentProcess && session.isCurrentProcessPty && session.currentProcess.stdin && !session.currentProcess.stdin.destroyed) {
-                try {
-                    const resizePayload = JSON.stringify({
-                        __ctrl__: 'resize',
-                        cols: cols,
-                        rows: rows
-                    }) + '\n';
-                    session.currentProcess.stdin.write(resizePayload);
-                } catch (e) {}
-            }
-            return;
-        }
-
-        // Ação de cancelamento explícito (Ctrl+C)
         if (parsed.action === 'kill') {
-            if (session.isSsh && session.sshStream) {
+            if (activeProcesses.has(tabId)) {
+                const p = activeProcesses.get(tabId);
                 try {
-                    session.sshStream.write('\x03');
-                } catch (e) {}
-                return;
-            }
-            if (session.currentProcess) {
-                try {
-                    if (session.isCurrentProcessPty && session.currentProcess.stdin && !session.currentProcess.stdin.destroyed) {
-                        session.currentProcess.stdin.write(JSON.stringify({ __ctrl__: 'kill' }) + '\n');
-                    }
-                    if (session.currentProcess.pid) {
-                        process.kill(-session.currentProcess.pid, 'SIGINT');
-                    }
+                    if (p.pid) process.kill(-p.pid, 'SIGINT');
                 } catch (e) {
-                    try {
-                        session.currentProcess.kill('SIGKILL');
-                    } catch (e2) {}
+                    try { p.kill('SIGKILL'); } catch (e2) {}
                 }
-                broadcastToTab(tabId, { type: 'system', data: '\n[Sinal SIGINT enviado: Processo interrompido pelo usuário]\n' });
-                broadcastToTab(tabId, { type: 'pty_closed' });
-                broadcastToTab(tabId, { type: 'status_idle' });
-                session.currentProcess = null;
-                session.isCurrentProcessPty = false;
+                activeProcesses.delete(tabId);
+                broadcastToTab(tabId, { type: 'system', data: '\n[Processo interrompido pelo usuário]\n' });
+                broadcastToTab(tabId, { type: 'status_idle', exitCode: 130 });
                 broadcastTabsList();
             } else {
-                ws.send(JSON.stringify({ tabId, type: 'system', data: '\n[Nenhum processo ativo para interromper]\n' }));
                 ws.send(JSON.stringify({ tabId, type: 'status_idle' }));
             }
             return;
         }
 
-        // Ação de limpar histórico no servidor para a aba
         if (parsed.action === 'clear_history') {
             session.logHistory.length = 0;
+            session.messages.length = 0;
+            saveSessionsToDisk();
             return;
         }
 
-        // Ação de entrada interativa / tecla / resposta (stdin ou PTY raw input)
-        if (parsed.action === 'input' || parsed.action === 'pty_input') {
-            const rawData = parsed.data !== undefined ? String(parsed.data) : '';
-            if (session.isSsh && session.sshStream) {
-                try {
-                    session.sshStream.write(rawData);
-                } catch (e) {}
-                return;
-            }
-            if (session.currentProcess && session.currentProcess.stdin && !session.currentProcess.stdin.destroyed) {
-                try {
-                    if (session.isCurrentProcessPty) {
-                        // Envia para a bridge PTY
-                        const ctrlMsg = JSON.stringify({ __ctrl__: 'input', data: rawData }) + '\n';
-                        session.currentProcess.stdin.write(ctrlMsg);
-                    } else {
-                        session.currentProcess.stdin.write(rawData + '\n');
-                        broadcastToTab(tabId, { type: 'system', data: `[Entrada: ${rawData}]\n` });
-                    }
-                } catch (err) {
-                    console.error('Erro ao escrever no stdin:', err);
-                }
-            }
-            return;
-        }
-
-        // Ação de execução de comando
-        if (parsed.action === 'command') {
+        // Ação de Execução de Prompt ou Comando via WebSocket
+        if (parsed.action === 'prompt' || parsed.action === 'command') {
             const cmd = parsed.data ? parsed.data.trim() : '';
             if (!cmd) return;
-            
-            if (session.currentProcess) {
-                ws.send(JSON.stringify({ tabId, type: 'error', data: '\n[Aviso: Um processo já está em execução nesta aba. Encerre-o ou abra uma nova aba.]\n' }));
+
+            if (activeProcesses.has(tabId)) {
+                ws.send(JSON.stringify({ tabId, type: 'error', data: '\n[Aviso: Já existe um processo em execução nesta aba]\n' }));
                 return;
             }
 
-            session.lastCommand = cmd;
-
-            // Identifica se é comando com tela cheia / TUI tradicional (top, nano, htop, vi, fzf, etc.)
-            const isInteractiveTui = /^(top|htop|nano|vi|vim|less|more|fzf|tmux)$/.test(cmd);
-
-            const shortCwd = formatShortCwd(session.cwd);
-            broadcastToTab(tabId, { type: 'system', data: `\n${shortCwd}$ ${cmd}\n` });
-
-            const fullPath = [
-                '/root/.gemini/antigravity-cli/bin',
-                '/root/.local/bin',
-                '/data/data/com.termux/files/usr/bin',
-                '/usr/local/sbin',
-                '/usr/local/bin',
-                '/usr/sbin',
-                '/usr/bin',
-                '/sbin',
-                '/bin',
-                process.env.PATH || ''
-            ].filter(Boolean).join(':');
-
-            const userHome = process.env.HOME || '/root';
-            const userName = process.env.USER || 'root';
-            const defaultCols = parsed.cols || 80;
-            const defaultRows = parsed.rows || 24;
-
-            if (isInteractiveTui) {
-                session.isCurrentProcessPty = true;
-                broadcastToTab(tabId, { type: 'pty_opened', command: cmd });
-                broadcastTabsList();
-
-                const bridgeScript = path.join(__dirname, 'pty_bridge.py');
-                session.currentProcess = spawn('python3', [bridgeScript, cmd, String(defaultRows), String(defaultCols)], {
+            // Tratamento especial /open para Termux Bridge
+            if (/^\/open(\s+.*)?$/i.test(cmd) || /^\/termux(\s+.*)?$/i.test(cmd)) {
+                const targetArg = cmd.replace(/^\/(?:open|termux)\s*/i, '').trim();
+                const targetPath = targetArg || session.cwd;
+                const shortCwd = formatShortCwd(session.cwd);
+                broadcastToTab(tabId, { type: 'system', data: `\n${shortCwd}$ ${cmd}\n` });
+                
+                const openScript = path.join(__dirname, 'scripts', 'open_in_termux.py');
+                const p = spawn('python3', [openScript, targetPath], {
                     cwd: session.cwd,
-                    detached: true,
-                    env: Object.assign({}, process.env, {
-                        HOME: userHome,
-                        USER: userName,
-                        PATH: fullPath,
-                        FORCE_COLOR: '1',
-                        CLICOLOR: '1',
-                        CLICOLOR_FORCE: '1',
-                        TERM: 'xterm-256color',
-                        COLORTERM: 'truecolor'
-                    })
+                    env: process.env
                 });
 
-                session.currentProcess.stdout.on('data', (data) => {
-                    const str = data.toString('utf-8');
-                    broadcastToTab(tabId, { type: 'pty_output', data: str });
-                });
-
-                session.currentProcess.stderr.on('data', (data) => {
-                    const str = data.toString('utf-8');
-                    broadcastToTab(tabId, { type: 'pty_output', data: str });
-                });
-            } else {
-                session.isCurrentProcessPty = false;
-                broadcastTabsList();
-
-                let effectiveCmd = cmd;
-                // Se for comando 'agy' ou 'agy <prompt>', adapta para execução limpa em streaming não-bloqueante
-                if (effectiveCmd === 'agy') {
-                    effectiveCmd = `agy -p "Olá! Como posso te ajudar com o projeto?" -c --dangerously-skip-permissions`;
-                } else if (/^agy\s+(.+)$/.test(effectiveCmd)) {
-                    const agyArgs = effectiveCmd.replace(/^agy\s+/, '').trim();
-                    // Se não tiver flags de print ou help (-p, --print, -h, --help, models, etc.), passa como prompt
-                    if (!agyArgs.startsWith('-') && !/^(models|mcp|plugins|update|help|changelog|agents)/.test(agyArgs)) {
-                        effectiveCmd = `agy -p ${JSON.stringify(agyArgs)} -c --dangerously-skip-permissions`;
+                p.stdout.on('data', (d) => broadcastToTab(tabId, { type: 'stdout', data: d.toString() }));
+                p.stderr.on('data', (d) => broadcastToTab(tabId, { type: 'stderr', data: d.toString() }));
+                p.on('close', (code) => {
+                    if (code === 0) {
+                        broadcastToTab(tabId, { type: 'system', data: `\n[Sucesso: Solicitação enviada ao Termux Bridge]\n` });
+                    } else {
+                        broadcastToTab(tabId, { type: 'error', data: `\n[Aviso: Termux Bridge retornou código ${code}]\n` });
                     }
-                }
-
-                // Injeta suporte para execução limpa de comandos preservando detecção de cwd e de ambiente (Termux vs Distro/PRoot)
-                const envDetectSnippet = `if [ -f /etc/os-release ]; then . /etc/os-release; _DISTRO_NAME="$NAME"; elif [ -n "$PREFIX" ] && echo "$PREFIX" | grep -q com.termux; then _DISTRO_NAME="Termux"; else _DISTRO_NAME="Linux"; fi; echo "__NEW_ENV__=\${_DISTRO_NAME:-Linux}"`;
-                const wrappedCmd = `${effectiveCmd}\n__EXIT_CODE__=$?\necho "__NEW_CWD__=$(pwd)"\n${envDetectSnippet}\nexit $__EXIT_CODE__`;
-
-                session.currentProcess = spawn(wrappedCmd, {
-                    shell: true,
-                    detached: true,
-                    cwd: session.cwd,
-                    env: Object.assign({}, process.env, {
-                        HOME: userHome,
-                        USER: userName,
-                        PATH: fullPath,
-                        FORCE_COLOR: '1',
-                        CLICOLOR: '1',
-                        CLICOLOR_FORCE: '1',
-                        TERM: 'xterm-256color',
-                        DEBIAN_FRONTEND: 'readline',
-                        LS_COLORS: process.env.LS_COLORS || 'rs=0:no=37:fi=37:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32'
-                    })
+                    broadcastToTab(tabId, { type: 'status_idle' });
                 });
-
-                session.currentProcess.stdout.on('data', (data) => {
-                    let text = data.toString();
-                    
-                    // Intercepta e atualiza o novo diretório atual
-                    if (text.includes('__NEW_CWD__=')) {
-                        const match = text.match(/__NEW_CWD__=(.*?)(\r?\n|$)/);
-                        if (match && match[1]) {
-                            session.cwd = match[1].trim();
-                            broadcastToTab(tabId, { type: 'cwd_updated', cwd: session.cwd });
-                            broadcastTabsList();
-                        }
-                        text = text.replace(/__NEW_CWD__=.*?(\r?\n|$)/g, '');
-                    }
-
-                    // Intercepta e atualiza o novo ambiente em tempo real (ex: Termux -> Ubuntu PRoot)
-                    if (text.includes('__NEW_ENV__=')) {
-                        const envMatch = text.match(/__NEW_ENV__=(.*?)(\r?\n|$)/);
-                        if (envMatch && envMatch[1]) {
-                            const rawEnv = envMatch[1].trim();
-                            let detectedType = 'distro';
-                            let detectedLabel = rawEnv;
-
-                            if (/termux/i.test(rawEnv)) {
-                                detectedType = 'termux';
-                                detectedLabel = 'Termux';
-                            } else if (/ubuntu/i.test(rawEnv)) {
-                                detectedLabel = 'Ubuntu';
-                            } else if (/debian/i.test(rawEnv)) {
-                                detectedLabel = 'Debian';
-                            } else if (/arch/i.test(rawEnv)) {
-                                detectedLabel = 'Arch';
-                            } else if (/alpine/i.test(rawEnv)) {
-                                detectedLabel = 'Alpine';
-                            } else if (/fedora/i.test(rawEnv)) {
-                                detectedLabel = 'Fedora';
-                            } else if (/kali/i.test(rawEnv)) {
-                                detectedLabel = 'Kali';
-                            }
-
-                            if (!session.isSsh && (session.envLabel !== detectedLabel || session.envType !== detectedType)) {
-                                session.envType = detectedType;
-                                session.envLabel = detectedLabel;
-                                session.title = detectedLabel;
-                                broadcastToTab(tabId, {
-                                    type: 'env_updated',
-                                    envType: detectedType,
-                                    envLabel: detectedLabel,
-                                    title: detectedLabel
-                                });
-                                broadcastTabsList();
-                            }
-                        }
-                        text = text.replace(/__NEW_ENV__=.*?(\r?\n|$)/g, '');
-                    }
-
-                    if (text && text.trim().length > 0) {
-                        broadcastToTab(tabId, { type: 'output', data: text });
-                    }
-                });
-
-                session.currentProcess.stderr.on('data', (data) => {
-                    broadcastToTab(tabId, { type: 'error', data: data.toString() });
-                });
+                return;
             }
 
-            let isFinished = false;
-            const handleFinish = (code, reason) => {
-                if (isFinished) return;
-                isFinished = true;
-                const wasPty = session.isCurrentProcessPty;
-                session.currentProcess = null;
-                session.isCurrentProcessPty = false;
-
-                if (wasPty) {
-                    broadcastToTab(tabId, { type: 'pty_closed' });
+            // Se for modo AGY Chat ou começar com agy
+            if (session.isAgyMode || parsed.action === 'prompt' || /^agy\s+/i.test(cmd) || cmd === 'agy') {
+                let cleanPrompt = cmd;
+                if (/^agy\s+/i.test(cleanPrompt)) {
+                    cleanPrompt = cleanPrompt.replace(/^agy\s+/i, '').trim();
+                } else if (cleanPrompt === 'agy') {
+                    cleanPrompt = 'Olá! Em que posso ajudar com este projeto?';
                 }
-                broadcastToTab(tabId, { type: 'status_idle', exitCode: code });
+
+                session.isAgyMode = true;
+                session.title = 'AGY Chat';
+                saveSessionsToDisk();
                 broadcastTabsList();
-            };
 
-            session.currentProcess.on('exit', (code) => {
-                handleFinish(code, 'exit');
-            });
-
-            session.currentProcess.on('close', (code) => {
-                handleFinish(code, 'close');
-            });
-            
-            session.currentProcess.on('error', (err) => {
-                broadcastToTab(tabId, { type: 'error', data: `\n[Falha de execução: ${err.message}]\n` });
-                handleFinish(1, 'error');
-            });
+                runHeadlessAgyPrompt({
+                    prompt: cleanPrompt,
+                    tabId: tabId,
+                    cwd: session.cwd,
+                    continueSession: true
+                });
+            } else {
+                // Comando de shell tradicional
+                runHeadlessCommand({
+                    command: cmd,
+                    tabId: tabId,
+                    cwd: session.cwd
+                });
+            }
         }
     });
 });
 
-// Binding do servidor e fallback dinâmico
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT, 10) || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Termux CLI Web] Servidor rodando em http://localhost:${PORT}`);
-    console.log(`[Termux CLI Web] Suporte a Múltiplas Abas + PTY + Xterm ativado.`);
+    console.log(`[Termux CLI Web] Servidor Headless rodando em http://0.0.0.0:${PORT}`);
+    console.log(`[Termux CLI Web] Endpoint Headless Antigravity ativo: POST /api/prompt`);
 });

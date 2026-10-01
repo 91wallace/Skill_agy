@@ -1,0 +1,27 @@
+{
+  "name": "termux-web-cli-v2",
+  "version": "2.0.0",
+  "description": "Interface web PWA premium e modular para o terminal nativo do Android via Termux",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "termux",
+    "terminal",
+    "pwa",
+    "xterm",
+    "android",
+    "pty",
+    "ssh",
+    "agent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "ssh2": "^1.17.0",
+    "ws": "^8.17.0"
+  }
+}

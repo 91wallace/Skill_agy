@@ -1,415 +1,344 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="h-full bg-gray-950">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
-    <title>Termux Web CLI</title>
+    <title>Antigravity Web Hub</title>
     
     <!-- Manifesto PWA -->
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#111827">
-    <link rel="apple-touch-icon" href="icon.png">
+    <meta name="theme-color" content="#090d16">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="folder_1250635.png">
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Marked.js e DOMPurify para renderização rica de Markdown / Código -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gray: {
+                            850: '#172033',
+                            900: '#0f172a',
+                            950: '#090d16'
+                        },
+                        agy: {
+                            50: '#faf5ff',
+                            400: '#c084fc',
+                            500: '#a855f7',
+                            600: '#9333ea',
+                            900: '#3b0764'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+                        sans: ['Plus Jakarta Sans', 'Inter', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Marked.js + DOMPurify para renderização de Markdown nativo sem xterm -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-    <!-- XTerm.js Local para emulação interativa TUI completa (agy, top, nano) -->
-    <link rel="stylesheet" href="xterm.css">
-    <script src="xterm.js"></script>
-    <script src="xterm-addon-fit.js"></script>
-    <link rel="stylesheet" href="styles.css?v=7.1">
-</head>
-<body class="bg-gray-900 text-gray-100 flex flex-col font-mono overflow-hidden app-container">
+    <!-- Highlight.js para realce sintático em blocos de código -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 
-    <!-- Cabeçalho Superior com Abas Integradas (Browser / Editor Tab Bar) -->
-    <header class="bg-gray-950 px-2.5 pt-1.5 pb-0 flex items-center justify-between shadow-md border-b border-gray-800 z-10 shrink-0 select-none gap-2">
-        <!-- Lista de Abas com visual de aba real + Botão Nova Aba integrado -->
-        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar flex-1 min-w-0">
-            <div id="tabs-list" class="flex items-end gap-1 flex-shrink-0">
-                <!-- Abas inseridas dinamicamente via JS com formato de abas verdadeiras -->
+    <link rel="stylesheet" href="styles.css?v=9.0">
+</head>
+<body class="bg-gray-950 text-gray-100 flex flex-col font-sans overflow-hidden app-container antialiased selection:bg-purple-900 selection:text-white">
+
+    <!-- Topbar & Tabs -->
+    <header class="bg-gray-950/90 backdrop-blur-md px-3 pt-2 pb-0 flex items-center justify-between border-b border-gray-800/80 z-20 shrink-0 select-none gap-2">
+        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-1 min-w-0">
+            <!-- Lista Dinâmica de Abas -->
+            <div id="tabs-list" class="flex items-end gap-1.5 flex-shrink-0">
+                <!-- Injetado dinamicamente via JS -->
             </div>
-            <button id="btn-add-tab" type="button" class="btn-add-tab-header hover:bg-gray-800 text-gray-400 hover:text-green-400 p-1.5 rounded-lg text-xs font-bold shrink-0 flex items-center justify-center active:scale-90 transition-all ml-0.5 mb-1" title="Nova Aba (+)">
+            <button id="btn-add-tab" type="button" class="btn-add-tab-header text-gray-400 hover:text-purple-400 hover:bg-gray-800/70 p-1.5 rounded-lg text-xs font-bold shrink-0 flex items-center justify-center active:scale-95 transition-all mb-1" title="Nova Conversa / Aba">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path>
                 </svg>
             </button>
         </div>
 
-        <!-- Status de Conexão no canto direito -->
-        <div id="status-indicator" class="flex items-center text-xs shrink-0 pl-2 mb-1">
-            <span class="w-2 h-2 rounded-full bg-yellow-500 mr-1.5" id="status-dot"></span>
-            <span id="status-text" class="text-gray-400 text-[11px] hidden sm:inline">Conectando...</span>
+        <!-- Indicador de Status e Conexão -->
+        <div class="flex items-center gap-2 shrink-0 pl-2 mb-1.5">
+            <div id="status-indicator" class="flex items-center text-xs bg-gray-900/80 border border-gray-800 px-2.5 py-1 rounded-full">
+                <span class="w-2 h-2 rounded-full bg-yellow-500 mr-1.5" id="status-dot"></span>
+                <span id="status-text" class="text-gray-400 text-[11px] font-mono">Conectando...</span>
+            </div>
         </div>
     </header>
 
-    <!-- Área do Terminal -->
-    <main id="terminal-container" class="flex-1 overflow-y-auto p-2 flex flex-col relative">
-        <!-- Barra de Comandos Anteriores (Espessura de 1 Linha com Dropdown Expansível e Altura Ergonômica) -->
-        <div id="past-commands-bar" class="hidden shrink-0 flex-col bg-gray-900/95 border border-gray-700/60 rounded-xl mb-2 text-xs transition-all shadow-md">
-            <div id="past-commands-header" class="flex items-center justify-between px-3 py-2 cursor-pointer select-none text-gray-400 hover:text-gray-200 transition-colors min-h-[36px]">
-                <div class="flex items-center gap-2 min-w-0 flex-1 truncate">
-                    <span id="past-commands-latest-text" class="truncate font-mono text-[12.5px] text-gray-200 flex-1"></span>
-                </div>
-                <button id="btn-toggle-past-commands" type="button" class="text-gray-400 hover:text-white p-1 ml-2 rounded-lg hover:bg-gray-800 transition-transform flex items-center justify-center" title="Ver todos os comandos anteriores">
-                    <svg class="past-chevron w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path>
-                    </svg>
+    <!-- Main Container: Feed de Conversa e Execuções -->
+    <main id="chat-container" class="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-3 relative scroll-smooth">
+        <!-- Hero Inicial (Mostrado se não houver histórico) -->
+        <div id="empty-state" class="my-auto mx-auto max-w-lg text-center flex flex-col items-center justify-center p-6 border border-gray-800/60 bg-gray-900/30 rounded-2xl backdrop-blur-sm">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-500/20 mb-3.5">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+            </div>
+            <h2 class="text-base font-bold text-gray-100 tracking-tight">Antigravity Headless Assistant</h2>
+            <p class="text-xs text-gray-400 mt-1 max-w-sm">Execute prompts inteligentes, gerencie arquivos e controle seu ambiente Android/Termux com saída limpa em Markdown nativo.</p>
+            
+            <!-- Sugestões Rápidas -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 w-full text-left">
+                <button type="button" class="quick-prompt-chip p-2.5 rounded-xl bg-gray-850/80 hover:bg-gray-800 border border-gray-800 hover:border-purple-500/40 text-xs text-gray-300 transition-all active:scale-95" data-prompt="Quais são os principais arquivos e a estrutura deste projeto?">
+                    <div class="font-semibold text-purple-300">📁 Analisar Estrutura</div>
+                    <div class="text-[11px] text-gray-400 truncate">Resumo do diretório atual</div>
+                </button>
+                <button type="button" class="quick-prompt-chip p-2.5 rounded-xl bg-gray-850/80 hover:bg-gray-800 border border-gray-800 hover:border-purple-500/40 text-xs text-gray-300 transition-all active:scale-95" data-prompt="Qual é o status do repositório git e as últimas alterações?">
+                    <div class="font-semibold text-emerald-300">🌿 Status Git</div>
+                    <div class="text-[11px] text-gray-400 truncate">Verificar branch e commits</div>
+                </button>
+                <button type="button" class="quick-prompt-chip p-2.5 rounded-xl bg-gray-850/80 hover:bg-gray-800 border border-gray-800 hover:border-purple-500/40 text-xs text-gray-300 transition-all active:scale-95" data-prompt="Execute uma checagem de integridade e dependências no projeto.">
+                    <div class="font-semibold text-blue-300">🔍 Checagem de Saúde</div>
+                    <div class="text-[11px] text-gray-400 truncate">Validar arquivos e configs</div>
+                </button>
+                <button type="button" class="quick-prompt-chip p-2.5 rounded-xl bg-gray-850/80 hover:bg-gray-800 border border-gray-800 hover:border-purple-500/40 text-xs text-gray-300 transition-all active:scale-95" data-prompt="Quais tarefas e melhorias podemos implementar a seguir?">
+                    <div class="font-semibold text-amber-300">💡 Próximos Passos</div>
+                    <div class="text-[11px] text-gray-400 truncate">Sugestões de melhorias</div>
                 </button>
             </div>
-            <!-- Lista descolapsável com todos os comandos anteriores -->
-            <div id="past-commands-list" class="hidden max-h-56 overflow-y-auto border-t border-gray-800/80 p-2 flex flex-col gap-1.5 font-mono text-xs">
-                <!-- Itens inseridos dinamicamente -->
-            </div>
         </div>
 
-        <div id="terminal-output" class="whitespace-pre-wrap word-break leading-relaxed pb-2 flex flex-col gap-1"></div>
-
-        <!-- Árvore de Diretórios Flutuante (VS Code Explorer Flutuante com 1 Separador e Botão Fechar Maior) -->
-        <div id="directory-tree-panel" class="hidden bg-gray-900/95 border border-gray-700/80 rounded-xl shadow-2xl p-2.5 transition-all text-xs z-30">
-            <div class="flex justify-between items-center pb-2 border-b border-gray-800 text-[11.5px] text-gray-400 font-sans">
-                <div class="flex items-center gap-1.5 truncate">
-                    <button id="btn-tree-up" type="button" class="text-gray-400 hover:text-yellow-400 hover:bg-gray-800 p-1.5 rounded transition-colors flex items-center justify-center font-bold" title="Voltar ao diretório anterior (cd ..)">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
-                        </svg>
-                    </button>
-                    <svg class="tree-dir-icon w-4 h-4 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
-                    </svg>
-                    <span id="tree-current-cwd" class="text-gray-200 font-mono truncate font-medium">~</span>
-                </div>
-                <button id="btn-close-dir-tree" type="button" class="text-gray-400 hover:text-white hover:bg-gray-800/80 w-7 h-7 rounded-lg flex items-center justify-center font-bold text-lg leading-none transition-colors active:scale-90" title="Fechar visualização de diretórios">&times;</button>
-            </div>
-            <div id="directory-tree-content" class="flex flex-col gap-0.5 pt-2 max-h-60 overflow-y-auto">
-                <!-- Itens da árvore renderizados via JS -->
-            </div>
+        <!-- Feed de Mensagens / Blocos de Execução -->
+        <div id="messages-feed" class="flex flex-col gap-3 pb-2 w-full max-w-4xl mx-auto">
+            <!-- Mensagens renderizadas dinamicamente via JS -->
         </div>
-        
-        <!-- Painel Visual de Múltipla Escolha / Opções Interativas -->
-        <div id="interactive-options-panel" class="hidden bg-gray-900/95 border border-indigo-500/40 rounded-xl shadow-2xl p-3 my-2 flex flex-col gap-2 transition-all text-xs backdrop-blur-md">
-            <div class="flex justify-between items-center pb-2 border-b border-gray-800 text-[12px] font-sans">
-                <div class="flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
-                    <span id="options-panel-title" class="text-indigo-200 font-bold">Selecione uma opção:</span>
-                </div>
-                <!-- Countdown badge com animação circular/barra de tempo -->
-                <div id="options-timer-badge" class="flex items-center gap-1.5 bg-indigo-950/80 border border-indigo-500/30 px-2 py-0.5 rounded-full text-indigo-300 text-[11px] font-mono">
-                    <svg class="w-3 h-3 text-indigo-400 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-                    </svg>
-                    <span>Auto em <strong id="options-timer-seconds">5s</strong></span>
-                </div>
-            </div>
-            
-            <!-- Barra de progresso do timer -->
-            <div id="options-timer-progress-bg" class="w-full bg-gray-800 rounded-full h-1 overflow-hidden">
-                <div id="options-timer-progress-bar" class="bg-indigo-500 h-full w-full transition-all duration-100 ease-linear"></div>
-            </div>
 
-            <!-- Lista de Botões de Opções -->
-            <div id="interactive-options-list" class="flex flex-col gap-1.5 pt-1">
-                <!-- Botões gerados dinamicamente via JS -->
+        <!-- Indicador Ativo de Processamento / Execução -->
+        <div id="active-processing-indicator" class="hidden shrink-0 max-w-4xl mx-auto w-full">
+            <div class="flex items-center justify-between p-3 rounded-2xl bg-gray-900/90 border border-purple-500/40 shadow-xl backdrop-blur-md">
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                    <div class="relative flex items-center justify-center w-4 h-4 shrink-0">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500 shadow-[0_0_10px_#a855f7]"></span>
+                    </div>
+                    <div class="w-3.5 h-3.5 border-2 border-purple-500/30 border-t-purple-400 rounded-full animate-spin shrink-0"></div>
+                    <div class="flex flex-col min-w-0">
+                        <span id="processing-label" class="text-xs font-semibold text-purple-200 truncate">Antigravity processando resposta...</span>
+                        <span id="processing-timer" class="text-[10.5px] font-mono text-purple-400/90">0s decorridos</span>
+                    </div>
+                </div>
+                <button type="button" id="btn-stop-execution" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 px-3 py-1.5 rounded-xl text-xs font-semibold active:scale-95 transition-all flex items-center gap-1.5 shadow-sm">
+                    <svg class="w-3 h-3 fill-current" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                    <span>Parar</span>
+                </button>
             </div>
         </div>
     </main>
 
-    <!-- Controles Inferiores (Thumb-zone) -->
-    <footer class="bg-gray-800 p-2 border-t border-gray-700 flex flex-col gap-2 z-10 shrink-0 footer-safe relative">
+    <!-- Área de Input / Prompt Bar -->
+    <div class="bg-gray-950/95 border-t border-gray-800/80 px-3 pt-2 pb-1.5 z-20 shrink-0">
+        <div class="max-w-4xl mx-auto flex flex-col gap-1.5">
+            <!-- Seletor de Modo & Informação de Diretório -->
+            <div class="flex items-center justify-between text-xs text-gray-400 px-1">
+                <div class="flex items-center gap-2">
+                    <button type="button" id="btn-mode-toggle" class="mode-pill active flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border border-purple-500/30 bg-purple-950/40 text-purple-300 hover:bg-purple-900/50 transition-all">
+                        <svg class="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        <span id="mode-label">Modo AGY IA</span>
+                    </button>
+                    <span class="text-gray-600">|</span>
+                    <button type="button" id="btn-show-cwd" class="flex items-center gap-1 text-[11px] font-mono text-gray-400 hover:text-amber-400 truncate max-w-[200px] transition-colors" title="Clique para abrir diretório">
+                        <svg class="w-3 h-3 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                        <span id="active-cwd-text" class="truncate">~</span>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" id="btn-clear-chat" class="text-gray-400 hover:text-gray-200 text-[11px] flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded hover:bg-gray-800" title="Limpar conversa atual">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        <span class="hidden sm:inline">Limpar</span>
+                    </button>
+                </div>
+            </div>
 
-        <!-- Atalhos Rápidos -->
-        <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar items-center">
-            <button class="shortcut-btn bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform flex items-center gap-1.5 font-bold shadow-md" data-cmd="agy">
-                <svg class="w-3.5 h-3.5 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                </svg>
-                <span>agy</span>
-            </button>
-            <button id="btn-ssh-toggle" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform flex items-center gap-1.5 font-semibold shadow-sm">
-                <svg class="w-3.5 h-3.5 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
-                </svg>
-                <span>SSH</span>
-            </button>
-            <button id="btn-snippets-toggle" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform flex items-center gap-1.5 font-semibold shadow-sm">
-                <svg class="w-3.5 h-3.5 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                </svg>
-                <span>Snippets</span>
-            </button>
-            <button id="btn-clipboard-toggle" class="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform flex items-center gap-1.5 font-semibold shadow-sm">
-                <svg class="w-3.5 h-3.5 fill-none stroke-current shrink-0" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
-                </svg>
-                <span>Clipboard</span>
-            </button>
-            <button id="btn-clear" class="bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform">Limpar</button>
-            <button id="btn-cancel" class="bg-red-900 hover:bg-red-800 text-red-200 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform">Cancelar (Ctrl+C)</button>
-            <button class="shortcut-btn bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform" data-cmd="ls -la">ls -la</button>
-            <button class="shortcut-btn bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-md whitespace-nowrap active:scale-95 transition-transform" data-cmd="top -n 1">top</button>
-            <button id="btn-settings-toggle" class="bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white text-xs w-8 h-8 rounded-md shrink-0 active:scale-95 transition-transform flex items-center justify-center ml-auto shadow-sm" title="Configurações">
+            <!-- Input Box com Auto-resize e Envio -->
+            <form id="prompt-form" class="flex items-end gap-2 bg-gray-900 border border-gray-700/80 focus-within:border-purple-500/80 rounded-2xl p-1.5 shadow-inner transition-colors">
+                <textarea id="prompt-input" rows="1" class="flex-1 min-w-0 bg-transparent text-gray-100 placeholder-gray-500 focus:outline-none text-xs sm:text-sm font-sans px-2.5 py-1.5 resize-none max-h-36 overflow-y-auto leading-relaxed" placeholder="Envie uma mensagem ou comando para o AGY..." enterkeyhint="send" autocomplete="off" spellcheck="false"></textarea>
+                <button type="submit" id="btn-send-prompt" class="bg-purple-600 hover:bg-purple-500 text-white w-9 h-9 rounded-xl shrink-0 active:scale-95 transition-all flex items-center justify-center shadow-md shadow-purple-600/30 font-bold" title="Enviar (Enter)">
+                    <svg class="w-4 h-4 fill-none stroke-current transform rotate-90" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                    </svg>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Thumb-Zone Mobile Toolbar (Inferior Ergonômica) -->
+    <footer class="bg-gray-950 px-3 py-2 border-t border-gray-800/80 flex items-center justify-between z-20 shrink-0 footer-safe">
+        <div class="flex gap-2.5 overflow-x-auto pb-0.5 no-scrollbar items-center max-w-4xl mx-auto w-full justify-between">
+            <div class="flex items-center gap-2">
+                <button id="btn-dir-toggle" type="button" class="toolbar-btn bg-amber-600/20 text-amber-300 border border-amber-500/30 hover:bg-amber-600/30 w-9 h-9 rounded-xl shrink-0 active:scale-95 transition-all flex items-center justify-center shadow-sm" title="Explorador de Arquivos">
+                    <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                </button>
+                <button id="btn-history-toggle" type="button" class="toolbar-btn bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 w-9 h-9 rounded-xl shrink-0 active:scale-95 transition-all flex items-center justify-center shadow-sm" title="Histórico de Prompts & Comandos">
+                    <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </button>
+                <button id="btn-snippets-toggle" type="button" class="toolbar-btn bg-blue-600/20 text-blue-300 border border-blue-500/30 hover:bg-blue-600/30 w-9 h-9 rounded-xl shrink-0 active:scale-95 transition-all flex items-center justify-center shadow-sm" title="Snippets & Ações Rápidas">
+                    <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                </button>
+                <button id="btn-clipboard-toggle" type="button" class="toolbar-btn bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600/30 w-9 h-9 rounded-xl shrink-0 active:scale-95 transition-all flex items-center justify-center shadow-sm" title="Área de Transferência">
+                    <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                </button>
+                <button id="btn-ssh-toggle" type="button" class="toolbar-btn bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 w-9 h-9 rounded-xl shrink-0 active:scale-95 transition-all flex items-center justify-center shadow-sm" title="Hosts SSH">
+                    <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+                </button>
+            </div>
+            <button id="btn-settings-toggle" type="button" class="toolbar-btn bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 w-9 h-9 rounded-xl shrink-0 active:scale-95 transition-all flex items-center justify-center shadow-sm" title="Configurações">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                 </svg>
             </button>
         </div>
-        
-        <!-- Input de Comando -->
-        <div id="command-container" role="search" class="flex gap-2 w-full items-center">
-            <input type="search" id="command-input" class="flex-1 min-w-0 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition-colors" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" enterkeyhint="go">
-            <button id="btn-run" type="button" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-md text-sm font-bold active:scale-95 transition-transform shrink-0">Run</button>
-        </div>
     </footer>
 
-    <!-- Modal / Bottom Sheet do Gerenciador SSH -->
-    <div id="ssh-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
-        <!-- Backdrop clickable -->
-        <div id="ssh-backdrop" class="flex-1"></div>
+    <!-- ========================================== -->
+    <!-- MODAIS E BOTTOM SHEETS -->
+    <!-- ========================================== -->
 
-        <!-- Painel Bottom Sheet SSH -->
-        <div class="bg-gray-900 border-t border-emerald-500/50 rounded-t-2xl shadow-2xl flex flex-col max-h-[90vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="ssh-sheet">
-            <!-- Barra Superior do Sheet -->
+    <!-- Modal Explorador de Diretórios -->
+    <div id="dir-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
+        <div id="dir-backdrop" class="flex-1"></div>
+        <div class="bg-gray-900 border-t border-amber-500/40 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="dir-sheet">
             <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-850">
-                <div class="flex items-center gap-2">
-                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
-                    </svg>
-                    <span class="text-gray-100 font-bold text-sm">Conexões SSH Remotas</span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button id="btn-toggle-add-ssh" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium flex items-center gap-1">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
-                        <span>Novo Host</span>
+                <div class="flex items-center gap-2 truncate">
+                    <button id="btn-dir-parent" type="button" class="text-gray-400 hover:text-amber-400 p-1 rounded hover:bg-gray-800 transition-colors" title="Subir nível">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                     </button>
-                    <button id="btn-close-ssh" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
+                    <svg class="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                    <span id="dir-modal-path" class="text-gray-200 font-mono text-xs truncate">~</span>
                 </div>
+                <button id="btn-close-dir" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
             </div>
-
-            <!-- Formulário de Conexão / Novo Host (Colapsável) -->
-            <div id="ssh-form-container" class="hidden p-3 bg-gray-800/90 border-b border-gray-700 flex flex-col gap-2.5">
-                <div class="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
-                    <span>Configurar Conexão SSH</span>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input type="text" id="ssh-label-input" placeholder="Nome / Rótulo (Ex: VPS Oracle, Servidor Proot)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-100 focus:outline-none focus:border-emerald-500 col-span-1 sm:col-span-2">
-                    <input type="text" id="ssh-host-input" placeholder="Host / IP (Ex: 192.168.1.100 ou meuservidor.com)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-emerald-500">
-                    <div class="flex gap-2">
-                        <input type="number" id="ssh-port-input" value="22" placeholder="Porta" class="w-20 bg-gray-900 border border-gray-600 rounded-lg px-2.5 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-emerald-500">
-                        <input type="text" id="ssh-user-input" value="root" placeholder="Usuário" class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-emerald-500">
-                    </div>
-                </div>
-
-                <!-- Tipo de Autenticação -->
-                <div class="flex items-center gap-4 text-xs pt-1 text-gray-300">
-                    <label class="flex items-center gap-1.5 cursor-pointer">
-                        <input type="radio" name="ssh-auth-type" value="password" checked class="text-emerald-500 focus:ring-0">
-                        <span>Senha</span>
-                    </label>
-                    <label class="flex items-center gap-1.5 cursor-pointer">
-                        <input type="radio" name="ssh-auth-type" value="key" class="text-emerald-500 focus:ring-0">
-                        <span>Chave Privada (SSH Key)</span>
-                    </label>
-                </div>
-
-                <!-- Campo Senha -->
-                <div id="ssh-auth-password-field" class="flex flex-col gap-1">
-                    <input type="password" id="ssh-password-input" placeholder="Senha do usuário SSH" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-100 focus:outline-none focus:border-emerald-500">
-                </div>
-
-                <!-- Campo Chave Privada -->
-                <div id="ssh-auth-key-field" class="hidden flex flex-col gap-1">
-                    <textarea id="ssh-key-input" rows="3" placeholder="Cole sua chave privada (-----BEGIN OPENSSH PRIVATE KEY-----...)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-emerald-500"></textarea>
-                    <input type="password" id="ssh-passphrase-input" placeholder="Passphrase da chave (opcional)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-emerald-500">
-                </div>
-
-                <!-- Ações do Formulário -->
-                <div class="flex items-center justify-between pt-1">
-                    <button id="btn-cancel-ssh-form" class="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300">Cancelar</button>
-                    <div class="flex items-center gap-2">
-                        <button id="btn-save-ssh-profile" class="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-emerald-300 border border-emerald-500/40 font-medium">Salvar Perfil</button>
-                        <button id="btn-connect-ssh-direct" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                            <span>Conectar Agora</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Lista de Servidores / Conexões Salvas -->
-            <div id="ssh-profiles-list" class="overflow-y-auto p-2 flex flex-col gap-1.5 min-h-[140px]">
-                <!-- Injetado dinamicamente via JS -->
+            <div id="dir-modal-list" class="overflow-y-auto p-2 flex flex-col gap-1 min-h-[200px]">
+                <!-- Lista de arquivos/pastas injetada dinamicamente -->
             </div>
         </div>
     </div>
 
-    <!-- Modal / Bottom Sheet de Snippets (Comandos) -->
-    <div id="snippets-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
-        <!-- Backdrop clickable -->
-        <div id="snippets-backdrop" class="flex-1"></div>
-
-        <!-- Painel Bottom Sheet -->
-        <div class="bg-gray-900 border-t border-gray-700 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="snippets-sheet">
-            <!-- Barra Superior do Sheet -->
+    <!-- Modal Histórico de Comandos e Prompts -->
+    <div id="history-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
+        <div id="history-backdrop" class="flex-1"></div>
+        <div class="bg-gray-900 border-t border-indigo-500/40 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="history-sheet">
             <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-850">
-                <span class="text-gray-100 font-bold text-sm">Comandos</span>
                 <div class="flex items-center gap-2">
-                    <button id="btn-toggle-delete-mode" class="bg-red-600 hover:bg-red-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">
-                        Deletar
-                    </button>
-                    <button id="btn-toggle-add-snippet" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">
-                        Novo
-                    </button>
+                    <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span class="text-gray-100 font-bold text-sm">Histórico de Comandos & Prompts</span>
+                </div>
+                <button id="btn-close-history" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
+            </div>
+            <div id="history-modal-list" class="overflow-y-auto p-2 flex flex-col gap-1.5 min-h-[160px] font-mono text-xs">
+                <!-- Injetado dinamicamente -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Snippets -->
+    <div id="snippets-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
+        <div id="snippets-backdrop" class="flex-1"></div>
+        <div class="bg-gray-900 border-t border-blue-500/40 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="snippets-sheet">
+            <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-850">
+                <span class="text-gray-100 font-bold text-sm">Snippets & Atalhos</span>
+                <div class="flex items-center gap-2">
+                    <button id="btn-toggle-add-snippet" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">Novo</button>
                     <button id="btn-close-snippets" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
                 </div>
             </div>
-
-            <!-- Formulário Minimalista de Adicionar Snippet (Colapsável) -->
-            <div id="snippet-form-container" class="hidden p-3 bg-gray-800/80 border-b border-gray-700">
-                <div class="text-xs font-semibold text-gray-300 mb-2">Novo Snippet</div>
-                <div class="flex flex-col gap-2">
-                    <input type="text" id="snippet-name-input" placeholder="Nome (Ex: Status Git)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-100 focus:outline-none focus:border-blue-500">
-                    <input type="text" id="snippet-cmd-input" placeholder="Comando (Ex: git status)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-blue-500">
-                    <div class="flex justify-end gap-2 mt-1">
-                        <button id="btn-cancel-add-snippet" class="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300">Cancelar</button>
-                        <button id="btn-save-snippet" class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold">Salvar</button>
-                    </div>
+            <div id="snippet-form-container" class="hidden p-3 bg-gray-800/90 border-b border-gray-700 flex flex-col gap-2">
+                <input type="text" id="snippet-name-input" placeholder="Nome do Snippet (Ex: Status Git)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-100 focus:outline-none focus:border-blue-500">
+                <input type="text" id="snippet-cmd-input" placeholder="Comando ou Prompt" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-blue-500">
+                <div class="flex justify-end gap-2 mt-1">
+                    <button id="btn-cancel-add-snippet" class="text-xs px-3 py-1.5 rounded-lg bg-gray-700 text-gray-300">Cancelar</button>
+                    <button id="btn-save-snippet" class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold">Salvar</button>
                 </div>
             </div>
-
-            <!-- Lista de Snippets -->
-            <div id="snippets-list" class="overflow-y-auto p-2 flex flex-col gap-1.5">
-                <!-- Injetado dinamicamente via JS -->
-            </div>
+            <div id="snippets-list" class="overflow-y-auto p-2 flex flex-col gap-1.5 min-h-[140px]"></div>
         </div>
     </div>
 
-    <!-- Modal / Bottom Sheet do Histórico da Área de Transferência (Clipboard) -->
+    <!-- Modal Clipboard -->
     <div id="clipboard-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
         <div id="clipboard-backdrop" class="flex-1"></div>
-
         <div class="bg-gray-900 border-t border-purple-500/40 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="clipboard-sheet">
             <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-850">
+                <span class="text-gray-100 font-bold text-sm">Histórico da Área de Transferência</span>
                 <div class="flex items-center gap-2">
-                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
-                    </svg>
-                    <span class="text-gray-100 font-bold text-sm">Histórico do Clipboard</span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button id="btn-clipboard-sync" class="bg-purple-700 hover:bg-purple-600 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium flex items-center gap-1" title="Colar do Sistema">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                        <span>Sincronizar</span>
-                    </button>
-                    <button id="btn-clipboard-clear-all" class="bg-red-600/80 hover:bg-red-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">
-                        Limpar
-                    </button>
+                    <button id="btn-clipboard-sync" class="bg-purple-700 hover:bg-purple-600 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">Colar Sistema</button>
+                    <button id="btn-clipboard-clear-all" class="bg-red-600/80 hover:bg-red-500 text-white text-xs px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform font-medium">Limpar</button>
                     <button id="btn-close-clipboard" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
                 </div>
             </div>
+            <div id="clipboard-list" class="overflow-y-auto p-2 flex flex-col gap-1.5 min-h-[140px]"></div>
+        </div>
+    </div>
 
-            <div id="clipboard-list" class="overflow-y-auto p-2 flex flex-col gap-1.5">
-                <!-- Injetado dinamicamente via JS -->
+    <!-- Modal SSH -->
+    <div id="ssh-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col justify-end hidden opacity-0 transition-opacity duration-300">
+        <div id="ssh-backdrop" class="flex-1"></div>
+        <div class="bg-gray-900 border-t border-emerald-500/40 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh] w-full transform translate-y-full transition-transform duration-300 ease-out" id="ssh-sheet">
+            <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-850">
+                <span class="text-gray-100 font-bold text-sm">Conexões SSH Remotas</span>
+                <button id="btn-close-ssh" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
+            </div>
+            <div class="p-3 flex flex-col gap-2">
+                <input type="text" id="ssh-host-input" placeholder="Host / IP (Ex: 192.168.1.50)" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100">
+                <div class="flex gap-2">
+                    <input type="number" id="ssh-port-input" value="8022" placeholder="Porta" class="w-20 bg-gray-900 border border-gray-600 rounded-lg px-2.5 py-2 text-xs font-mono text-gray-100">
+                    <input type="text" id="ssh-user-input" value="root" placeholder="Usuário" class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs font-mono text-gray-100">
+                </div>
+                <input type="password" id="ssh-password-input" placeholder="Senha SSH" class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-100">
+                <button id="btn-connect-ssh-direct" class="mt-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-2 rounded-lg font-bold">Conectar</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal de Configurações (Cores e Preferências) -->
+    <!-- Modal Configurações -->
     <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
         <div id="settings-backdrop" class="absolute inset-0"></div>
-
-        <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col w-full max-w-sm z-10 overflow-hidden transform scale-95 transition-transform duration-200" id="settings-card">
-            <!-- Cabeçalho das Configurações -->
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col w-full max-w-sm z-10 overflow-hidden" id="settings-card">
             <div class="p-3.5 border-b border-gray-800 flex justify-between items-center bg-gray-850">
-                <div class="flex items-center gap-2">
-                    <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                    </svg>
-                    <span class="text-gray-100 font-bold text-sm">Personalização</span>
-                </div>
+                <span class="text-gray-100 font-bold text-sm">Configurações</span>
                 <button id="btn-close-settings" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none">&times;</button>
             </div>
-
-            <!-- Corpo das Configurações -->
-            <div class="p-4 flex flex-col gap-4 overflow-y-auto max-h-[70vh] text-xs">
-                
-                <!-- Toggle: Mostrar Arquivos Ocultos -->
+            <div class="p-4 flex flex-col gap-3.5 text-xs">
                 <div class="flex items-center justify-between p-2.5 bg-gray-800/60 border border-gray-700/60 rounded-xl">
                     <div class="flex flex-col">
                         <span class="text-gray-200 font-medium">Arquivos Ocultos</span>
-                        <span class="text-gray-400 text-[11px]">Exibir arquivos que começam com .</span>
+                        <span class="text-gray-400 text-[11px]">Exibir arquivos ponto (.)</span>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" id="toggle-show-hidden" class="sr-only peer">
-                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600"></div>
+                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
                     </label>
                 </div>
-
-                <!-- Cores da Linha de Comando (Prompt) -->
-                <div class="flex flex-col gap-2 p-3 bg-gray-800/40 border border-gray-700/40 rounded-xl">
-                    <span class="text-gray-200 font-semibold">Linha de Comando (Prompt)</span>
-                    <span class="text-gray-400 text-[11px]">Cor do prompt [diretório]$ comando</span>
-                    <div class="flex items-center gap-2 pt-1 flex-wrap" id="swatches-prompt">
-                        <!-- Cores do sistema e opções brilhantes -->
-                        <button type="button" class="color-swatch-btn" data-color="#facc15" style="background-color: #facc15;" title="Amarelo Padrão"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#00ff66" style="background-color: #00ff66;" title="Verde Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#22c55e" style="background-color: #22c55e;" title="Verde"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#00d4ff" style="background-color: #00d4ff;" title="Azul Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#3b82f6" style="background-color: #3b82f6;" title="Azul"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#ff3366" style="background-color: #ff3366;" title="Vermelho Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#ef4444" style="background-color: #ef4444;" title="Vermelho"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#c084fc" style="background-color: #c084fc;" title="Roxo"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#f3f4f6" style="background-color: #f3f4f6;" title="Branco"></button>
+                <div class="flex items-center justify-between p-2.5 bg-gray-800/60 border border-gray-700/60 rounded-xl">
+                    <div class="flex flex-col">
+                        <span class="text-gray-200 font-medium">Auto-rolar ao fim</span>
+                        <span class="text-gray-400 text-[11px]">Rolar para novas mensagens</span>
                     </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-auto-scroll" checked class="sr-only peer">
+                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                    </label>
                 </div>
-
-                <!-- Cores dos Diretórios (Pastas) -->
-                <div class="flex flex-col gap-2 p-3 bg-gray-800/40 border border-gray-700/40 rounded-xl">
-                    <span class="text-gray-200 font-semibold">Diretórios (Pastas)</span>
-                    <span class="text-gray-400 text-[11px]">Cor dos ícones e nomes de diretórios no explorador e terminal</span>
-                    <div class="flex items-center gap-2 pt-1 flex-wrap" id="swatches-dirs">
-                        <!-- Cores do sistema e opções brilhantes -->
-                        <button type="button" class="color-swatch-btn" data-color="#facc15" style="background-color: #facc15;" title="Amarelo"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#00ff66" style="background-color: #00ff66;" title="Verde Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#22c55e" style="background-color: #22c55e;" title="Verde"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#00d4ff" style="background-color: #00d4ff;" title="Azul Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#3b82f6" style="background-color: #3b82f6;" title="Azul"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#ff3366" style="background-color: #ff3366;" title="Vermelho Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#ef4444" style="background-color: #ef4444;" title="Vermelho"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#c084fc" style="background-color: #c084fc;" title="Roxo"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#f3f4f6" style="background-color: #f3f4f6;" title="Branco"></button>
-                    </div>
-                </div>
-
-                <!-- Cores dos Arquivos -->
-                <div class="flex flex-col gap-2 p-3 bg-gray-800/40 border border-gray-700/40 rounded-xl">
-                    <span class="text-gray-200 font-semibold">Arquivos</span>
-                    <span class="text-gray-400 text-[11px]">Cor dos arquivos e documentos no explorador e terminal</span>
-                    <div class="flex items-center gap-2 pt-1 flex-wrap" id="swatches-files">
-                        <!-- Cores do sistema e opções brilhantes -->
-                        <button type="button" class="color-swatch-btn" data-color="#9ca3af" style="background-color: #9ca3af;" title="Cinza Padrão"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#f3f4f6" style="background-color: #f3f4f6;" title="Branco"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#00d4ff" style="background-color: #00d4ff;" title="Azul Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#3b82f6" style="background-color: #3b82f6;" title="Azul"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#00ff66" style="background-color: #00ff66;" title="Verde Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#22c55e" style="background-color: #22c55e;" title="Verde"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#ff3366" style="background-color: #ff3366;" title="Vermelho Brilhante (Neon)"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#facc15" style="background-color: #facc15;" title="Amarelo"></button>
-                        <button type="button" class="color-swatch-btn" data-color="#c084fc" style="background-color: #c084fc;" title="Roxo"></button>
-                    </div>
-                </div>
-
-                <!-- Botão Restaurar Padrões -->
-                <button id="btn-reset-colors" type="button" class="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium text-xs border border-gray-700 transition-colors">
-                    Restaurar Cores Padrão
-                </button>
             </div>
         </div>
     </div>
 
-    <script src="app.js?v=7.4"></script>
+    <script src="app.js?v=9.0"></script>
 </body>
 </html>

@@ -3,3 +3,10 @@ node_modules/
 *.log
 .DS_Store
 .env
+
+.agents/
+.gemini/
+.impeccable/
+.sessions_state.json
+nohup.out
+*.nohup.out

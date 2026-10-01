@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Helper CLI para executar comandos no Termux nativo diretamente via OpenSSH (porta 8022)
+
+SSH_PORT="${TERMUX_SSH_PORT:-8022}"
+SSH_HOST="${TERMUX_SSH_HOST:-127.0.0.1}"
+SSH_USER="${TERMUX_SSH_USER:-}"
+
+if [ -z "$1" ]; then
+  echo "Uso: termux-remote <comando>"
+  echo "Exemplos:"
+  echo "  termux-remote 'termux-battery-status'"
+  echo "  termux-remote 'am start -a android.intent.action.VIEW -d https://google.com'"
+  echo "  termux-remote 'termux-vibrate -d 500'"
+  exit 1
+fi
+
+TARGET_DEST="$SSH_HOST"
+if [ -n "$SSH_USER" ]; then
+  TARGET_DEST="$SSH_USER@$SSH_HOST"
+fi
+
+ssh -p "$SSH_PORT" \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR \
+    -o ConnectTimeout=5 \
+    "$TARGET_DEST" "$@"
